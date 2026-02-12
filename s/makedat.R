@@ -2,10 +2,10 @@ library(dplyr)
 library(purrr)
 library(tibble)
 source("./datfunc.R")
-load("../data/raw/allimg_2024.RData")  # loads `allimg for 2024`, complete metadata
-metagb = read.csv("../data/raw/metagb22.csv")
-metamab = read.csv("../data/raw/metama22.csv")
-meta22 = rbind(metagb, metamab)
+# load("../data/raw/allimg_2024.RData")  # loads `allimg for 2024`, complete metadata
+# metagb = read.csv("../data/raw/metagb22.csv")
+# metamab = read.csv("../data/raw/metama22.csv")
+# meta22 = rbind(metagb, metamab)
 #============================================================#
 # read data
 #============================================================#

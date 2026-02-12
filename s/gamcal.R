@@ -4,8 +4,8 @@ source("./gamfunc.R")
 load("../data/processed/Cas2024v2.RData")
 load("../data/processed/YOLO2024.RData")
 
-model = Cas2024v2
-model_name = deparse(substitute(Cas2024v2))
+model = YOLO2024
+model_name = deparse(substitute(YOLO2024))
 
 gams <- fit_calibration_gams(
   model = model,
@@ -14,7 +14,7 @@ gams <- fit_calibration_gams(
 
 pred_gb <- predict_calibration_by_depth(
   gam        = gams$GB,
-  calib_df   = get_calib_data(model, model_name, "GB"),
+  calib_df   = get_data(model, model_name, "GB"),
   depth_breaks = c(40, 80, 120),
   region     = "GB",
   model_name = model_name
@@ -22,7 +22,7 @@ pred_gb <- predict_calibration_by_depth(
 
 pred_mab <- predict_calibration_by_depth(
   gams$MAB,
-  calib_df   = get_calib_data(model, model_name, "MAB"),
+  calib_df   = get_data(model, model_name, "MAB"),
   depth_breaks = c(40, 50, 60, 70),
   region = "MAB",
   model_name = model_name
@@ -36,14 +36,14 @@ p_cal
 
 
 res_gb <- compute_image_level_counts(
-  calib_df  = get_calib_data(model, model_name, "GB"),
+  calib_df  = get_data(model, model_name, "GB"),
   gam       = gams$GB,
   region    = "GB",
   model_name = model_name
 )
 
 res_mab <- compute_image_level_counts(
-  calib_df  = get_calib_data(model, model_name, "MAB"),
+  calib_df  = get_data(model, model_name, "MAB"),
   gam       = gams$MAB,
   region    = "MAB",
   model_name = model_name

@@ -2,8 +2,9 @@ library(tidyverse)
 #============================================================#
 # Functions: Model-specific Regional GAMs
 #============================================================#
-get_calib_data <- function(model, model_name, region) {
-  nm <- paste0(model_name, "_", region, "_calib")
+get_data <- function(model, model_name, region, imglvl = FALSE) {
+  if (imglvl) nm <- paste0(model_name, "_", region, "_img") else {
+  nm <- paste0(model_name, "_", region, "_calib") }
   
   if (!nm %in% names(model)) {
     stop("Calibration dataset not found: ", nm)
@@ -14,8 +15,8 @@ get_calib_data <- function(model, model_name, region) {
 
 fit_calibration_gams <- function(model, model_name) {
   
-  gb_calib  <- get_calib_data(model, model_name, "GB")
-  mab_calib <- get_calib_data(model, model_name, "MAB")
+  gb_calib  <- get_data(model, model_name, "GB")
+  mab_calib <- get_data(model, model_name, "MAB")
   
   m_gb <- mgcv::gam(
     y ~ s(conf, bottom_depth, k = 7) +
@@ -40,6 +41,70 @@ fit_calibration_gams <- function(model, model_name) {
     model_name = model_name,
     GB  = m_gb,
     MAB = m_mab
+  )
+}
+
+fitfn_calibration_gams <- function(model, model_name) {
+  
+  gb_img  <- get_data(model, model_name, "GB", imglvl = TRUE)
+  mab_img <- get_data(model, model_name, "MAB", imglvl = TRUE)
+  
+  # Replace NA auto counts
+  gb_img$n_auto[is.na(gb_img$n_auto)] <- 0
+  mab_img$n_auto[is.na(mab_img$n_auto)] <- 0
+  
+  # Define FN presence
+  gb_img$fn_pres  <- as.integer(gb_img$n_auto < gb_img$n_manual)
+  mab_img$fn_pres <- as.integer(mab_img$n_auto < mab_img$n_manual)
+  
+  # Density term
+  gb_img$auto_density_log  <- log(gb_img$auto_density + 1e-6)
+  mab_img$auto_density_log <- log(mab_img$auto_density + 1e-6)
+  
+  #------------------------------#
+  # GB model
+  #------------------------------#
+  
+  # m_gb_fn <- mgcv::gam(
+  #   fn_pres ~ 
+  #     s(auto_density_log, k = 7) +
+  #     s(field_of_view_sq_meter, k = 7),
+  #   family = binomial(),
+  #   data = gb_img,
+  #   method = "REML"
+  # )
+  
+  #------------------------------#
+  # MAB model
+  #------------------------------#
+  
+  # m_mab_fn <- mgcv::gam(
+  #   fn_pres ~ 
+  #     s(auto_density_log, k = 7) +
+  #     s(field_of_view_sq_meter, k = 7),
+  #   family = binomial(),
+  #   data = mab_img,
+  #   method = "REML"
+  # )
+  
+  #------------------------------#
+  # Combined region model
+  #------------------------------#
+  
+  m_comb <- mgcv::gam(
+    fn_pres ~ 
+      s(auto_density_log, k = 7) +
+      s(field_of_view_sq_meter, k = 7),
+    family = binomial(),
+    data = rbind(mab_img, gb_img),
+    method = "REML"
+  )
+  
+  list(
+    model_name = model_name,
+    #GB  = m_gb_fn,
+    #MAB = m_mab_fn,
+    comb = m_comb
   )
 }
 
