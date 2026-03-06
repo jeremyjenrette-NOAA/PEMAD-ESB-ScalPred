@@ -50,10 +50,13 @@ evaluate_pr_curve <- function(
 evaluate_pr_models <- function(
     res_list,                         # one res OR list of res
     conf_grid = seq(0, 1, by = 0.0005),
-    title = "Precision–Recall Curves"
+    title = "Precision–Recall Curves",
+    stratify_region = TRUE,           # NEW: if FALSE, pool GB+MAB into one PR curve per model
+    pooled_label = ""             # NEW: suffix for pooled model_id
 ) {
   # allow passing a single res directly
   if (!is.list(res_list)) stop("res_list must be a list")
+  
   is_single_res <- all(c("calib_df","img_df") %in% names(res_list)) ||
     any(grepl("_GB_calib$|_MAB_calib$", names(res_list)))
   
@@ -71,27 +74,55 @@ evaluate_pr_models <- function(
     # infer model base name from names like "Cas2024v2_GB_calib"
     model_base <- sub("_.*$", "", names(res)[1])
     
+    # If someone passes already-pooled objects (calib_df/img_df), respect that:
+    if (all(c("calib_df", "img_df") %in% names(res)) && !any(grepl("_GB_calib$|_MAB_calib$", names(res)))) {
+      pr <- evaluate_pr_curve(
+        calib_df  = res[["calib_df"]],
+        img_df    = res[["img_df"]],
+        conf_grid = conf_grid,
+        model_id  = paste0(model_base, pooled_label)
+      )
+      return(pr)
+    }
+    
     GB_calib  <- get_el(res, "GB_calib",  "_GB_calib")
     GB_img    <- get_el(res, "GB_img",    "_GB_img")
     MAB_calib <- get_el(res, "MAB_calib", "_MAB_calib")
     MAB_img   <- get_el(res, "MAB_img",   "_MAB_img")
     
-    pr_gb <- evaluate_pr_curve(
-      calib_df = GB_calib,
-      img_df   = GB_img,
+    if (isTRUE(stratify_region)) {
+      pr_gb <- evaluate_pr_curve(
+        calib_df  = GB_calib,
+        img_df    = GB_img,
+        conf_grid = conf_grid,
+        model_id  = paste0(model_base, "_GB")
+      )
+      
+      pr_mab <- evaluate_pr_curve(
+        calib_df  = MAB_calib,
+        img_df    = MAB_img,
+        conf_grid = conf_grid,
+        model_id  = paste0(model_base, "_MAB")
+      )
+      
+      return(dplyr::bind_rows(pr_gb, pr_mab))
+    }
+    
+    # pooled across regions
+    calib_all <- dplyr::bind_rows(GB_calib, MAB_calib)
+    img_all   <- dplyr::bind_rows(GB_img,   MAB_img)
+    
+    pr_all_model <- evaluate_pr_curve(
+      calib_df  = calib_all,
+      img_df    = img_all,
       conf_grid = conf_grid,
-      model_id = paste0(model_base, "_GB")
+      model_id  = paste0(model_base, pooled_label)
     )
     
-    pr_mab <- evaluate_pr_curve(
-      calib_df = MAB_calib,
-      img_df   = MAB_img,
-      conf_grid = conf_grid,
-      model_id = paste0(model_base, "_MAB")
-    )
-    
-    dplyr::bind_rows(pr_gb, pr_mab)
+    pr_all_model
   })
+  
+  legend_title <- if (isTRUE(stratify_region)) "Mdl_Region" else "Model"
   
   p_pr <- ggplot2::ggplot(pr_all, ggplot2::aes(x = recall, y = precision, color = model)) +
     ggplot2::geom_path(linewidth = 1.2, na.rm = TRUE) +
@@ -100,7 +131,7 @@ evaluate_pr_models <- function(
       title = title,
       x = "Recall",
       y = "Precision",
-      color = "Mdl_Region"
+      color = legend_title
     )
   
   list(pr_all = pr_all, p_pr = p_pr)

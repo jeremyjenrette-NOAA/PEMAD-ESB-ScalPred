@@ -2,12 +2,41 @@ library(tidyverse)
 #============================================================#
 # Functions: Model-specific Regional GAMs
 #============================================================#
-get_data <- function(model, model_name, region, imglvl = FALSE) {
-  if (imglvl) nm <- paste0(model_name, "_", region, "_img") else {
-  nm <- paste0(model_name, "_", region, "_calib") }
+get_data <- function(model,
+                     model_name,
+                     region = NULL,
+                     imglvl = FALSE,
+                     pooled_regions = c("GB","MAB")) {
+  
+  # choose suffix
+  suffix <- if (imglvl) "img" else "calib"
+  
+  # -------------------------------------------------
+  # Case 1: return pooled dataset across regions
+  # -------------------------------------------------
+  if (is.null(region) || region == "ALL") {
+    
+    nm <- paste0(model_name, "_", pooled_regions, "_", suffix)
+    
+    missing <- nm[!nm %in% names(model)]
+    if (length(missing) > 0) {
+      stop("Missing datasets: ", paste(missing, collapse = ", "))
+    }
+    
+    df <- dplyr::bind_rows(
+      lapply(nm, function(n) model[[n]])
+    )
+    
+    return(df)
+  }
+  
+  # -------------------------------------------------
+  # Case 2: return region-specific dataset (original behavior)
+  # -------------------------------------------------
+  nm <- paste0(model_name, "_", region, "_", suffix)
   
   if (!nm %in% names(model)) {
-    stop("Calibration dataset not found: ", nm)
+    stop("Dataset not found: ", nm)
   }
   
   model[[nm]]
@@ -17,34 +46,45 @@ fit_calibration_gams <- function(model, model_name) {
   
   gb_calib  <- get_data(model, model_name, "GB")
   mab_calib <- get_data(model, model_name, "MAB")
+  comb <- rbind(gb_calib, mab_calib)
   
   m_gb <- mgcv::gam(
-    y ~ s(conf, bottom_depth, k = 7) +
-      s(conf, field_of_view_sq_meter, k = 7) +
-      s(latitude, longitude, k = 5),
+    y ~ s(conf, bottom_depth, k = 3),
+      # s(conf, field_of_view_sq_meter, k = 7),
+      # s(latitude, longitude, k = 5),
     family = binomial(),
     data = gb_calib,
     method = "REML"
   )
   
   m_mab <- mgcv::gam(
-    y ~ s(conf, bottom_depth, k = 7) +
-      s(conf, field_of_view_sq_meter, k = 5) +
-      s(conf, latitude, k = 7) +
-      s(conf, longitude, k = 7),
+    y ~ s(conf, bottom_depth, k = 3),
+      # s(conf, field_of_view_sq_meter, k = 7),
+      # s(conf, latitude, k = 7) +
+      # s(conf, longitude, k = 7),
     family = binomial(),
     data = mab_calib,
     method = "REML"
   )
   
+  m_comb <- gam(
+    y ~ 
+      s(conf, bottom_depth, k = 3),
+    family = binomial(),
+    data = comb,
+    method = "REML",
+    select = FALSE
+  )
+  
   list(
     model_name = model_name,
     GB  = m_gb,
-    MAB = m_mab
+    MAB = m_mab,
+    comb = m_comb
   )
 }
 
-fitfn_calibration_gams <- function(model, model_name) {
+fitfn_calibration_mod <- function(model, model_name, p_detect) {
   
   gb_img  <- get_data(model, model_name, "GB", imglvl = TRUE)
   mab_img <- get_data(model, model_name, "MAB", imglvl = TRUE)
@@ -61,50 +101,61 @@ fitfn_calibration_gams <- function(model, model_name) {
   gb_img$auto_density_log  <- log(gb_img$auto_density + 1e-6)
   mab_img$auto_density_log <- log(mab_img$auto_density + 1e-6)
   
+  reg_comb = rbind(mab_img, gb_img)
+  
+  reg_comb <- reg_comb %>%
+    inner_join(p_detect, by = "image_id") %>%
+    filter(n_manual > 0)
+  
   #------------------------------#
   # GB model
   #------------------------------#
   
-  # m_gb_fn <- mgcv::gam(
-  #   fn_pres ~ 
-  #     s(auto_density_log, k = 7) +
-  #     s(field_of_view_sq_meter, k = 7),
-  #   family = binomial(),
-  #   data = gb_img,
-  #   method = "REML"
-  # )
+  m_gb_fn <- mgcv::gam(
+    fn_pres ~
+      s(millimeter_per_pixel, k = 7),
+    family = binomial(),
+    data = gb_img,
+    method = "REML"
+  )
   
   #------------------------------#
   # MAB model
   #------------------------------#
   
-  # m_mab_fn <- mgcv::gam(
-  #   fn_pres ~ 
-  #     s(auto_density_log, k = 7) +
-  #     s(field_of_view_sq_meter, k = 7),
-  #   family = binomial(),
-  #   data = mab_img,
-  #   method = "REML"
-  # )
+  m_mab_fn <- mgcv::gam(
+    fn_pres ~
+      s(millimeter_per_pixel, k = 7),
+    family = binomial(),
+    data = mab_img,
+    method = "REML"
+  )
   
   #------------------------------#
   # Combined region model
   #------------------------------#
   
-  m_comb <- mgcv::gam(
+  # m_comb <- mgcv::gam(
+  #   fn_pres ~ s(predicted_number),
+  #   family = binomial(),
+  #   data = reg_comb,
+  #   method = "REML"
+  # )
+  
+  m_comb <- gam(
     fn_pres ~ 
-      s(auto_density_log, k = 7) +
-      s(field_of_view_sq_meter, k = 7),
+      s(predicted_number, k=7),
     family = binomial(),
-    data = rbind(mab_img, gb_img),
+    data = reg_comb,
     method = "REML"
   )
   
   list(
     model_name = model_name,
-    #GB  = m_gb_fn,
-    #MAB = m_mab_fn,
-    comb = m_comb
+    GB  = m_gb_fn,
+    MAB = m_mab_fn,
+    comb = m_comb,
+    data = reg_comb
   )
 }
 
@@ -195,25 +246,80 @@ compute_image_level_counts <- function(calib_df,
                                        model_name) {
   
   calib_df <- calib_df |>
-    mutate(pred_p = predict(gam, type = "response"))
+    dplyr::mutate(pred_p = stats::predict(gam, newdata = calib_df, type = "response"))
   
   img <- calib_df |>
-    group_by(image_id) |>
-    summarise(
+    dplyr::group_by(image_id) |>
+    dplyr::summarise(
       predicted_number = sum(pred_p, na.rm = TRUE),
       true_number      = sum(y, na.rm = TRUE),
       .groups = "drop"
     ) |>
-    mutate(region = region, model = model_name)
+    dplyr::mutate(region = region, model = model_name)
   
   metrics <- img |>
-    summarise(
-      r2      = summary(lm(true_number ~ predicted_number))$adj.r.squared,
-      rmse    = sqrt(mean((true_number - predicted_number)^2)),
+    dplyr::summarise(
+      r2   = summary(stats::lm(true_number ~ predicted_number))$adj.r.squared,
+      rmse = sqrt(mean((true_number - predicted_number)^2)),
       .groups = "drop"
     )
   
   list(img = img, metrics = metrics)
+}
+
+# ------------------------------------------------------------
+# NEW: combine regional GAM predictions and compute pooled metrics
+# ------------------------------------------------------------
+compute_image_level_counts_pooled <- function(
+    calib_df,
+    gam_by_region,                 # named list: list(GB = gam_gb, MAB = gam_mab)
+    region_col   = "region",
+    model_name   = "MyModel",
+    pooled_label = "ALL"
+) {
+  if (!region_col %in% names(calib_df)) stop("calib_df must contain column: ", region_col)
+  
+  img_list <- lapply(names(gam_by_region), function(r) {
+    df_r <- calib_df |> dplyr::filter(.data[[region_col]] == r)
+    if (nrow(df_r) == 0) return(NULL)
+    
+    # predict with the region GAM
+    df_r <- df_r |>
+      dplyr::mutate(pred_p = stats::predict(gam_by_region[[r]], newdata = df_r, type = "response"))
+    
+    # image-level sums
+    df_r |>
+      dplyr::group_by(image_id) |>
+      dplyr::summarise(
+        predicted_number = sum(pred_p, na.rm = TRUE),
+        true_number      = sum(y, na.rm = TRUE),
+        .groups = "drop"
+      ) |>
+      dplyr::mutate(region = r, model = model_name)
+  })
+  
+  img_all <- dplyr::bind_rows(img_list)
+  if (nrow(img_all) == 0) stop("No rows produced. Check region names vs calib_df[[region_col]].")
+  
+  metrics_pooled <- img_all |>
+    dplyr::summarise(
+      r2   = summary(stats::lm(true_number ~ predicted_number))$adj.r.squared,
+      rmse = sqrt(mean((true_number - predicted_number)^2)),
+      n_images = dplyr::n(),
+      .groups = "drop"
+    ) |>
+    dplyr::mutate(region = pooled_label, model = model_name)
+  
+  metrics_by_region <- img_all |>
+    dplyr::group_by(region, model) |>
+    dplyr::summarise(
+      r2   = summary(stats::lm(true_number ~ predicted_number))$adj.r.squared,
+      rmse = sqrt(mean((true_number - predicted_number)^2)),
+      n_images = dplyr::n(),
+      .groups = "drop"
+    )
+  
+  list(img_all = img_all, metrics_pooled = metrics_pooled, metrics_by_region = metrics_by_region)
 }
 
 plot_image_level_fit <- function(img_df, metrics_df) {

@@ -1,11 +1,11 @@
 library(tidyverse)
 source("./gamfunc.R")
 
-load("../data/processed/Cas2024v2.RData")
-load("../data/processed/YOLO2024.RData")
+load("../data/processed/Cas2022v2.RData")
+load("../data/processed/YOLOv72022.RData")
 
-model = YOLO2024
-model_name = deparse(substitute(YOLO2024))
+model = YOLOv262022
+model_name = deparse(substitute(YOLOv262022))
 
 gams <- fit_calibration_gams(
   model = model,
@@ -21,7 +21,7 @@ pred_gb <- predict_calibration_by_depth(
 )
 
 pred_mab <- predict_calibration_by_depth(
-  gams$MAB,
+  gam = gams$MAB,
   calib_df   = get_data(model, model_name, "MAB"),
   depth_breaks = c(40, 50, 60, 70),
   region = "MAB",
@@ -32,8 +32,6 @@ pred_all <- bind_rows(pred_gb, pred_mab)
 
 p_cal <- plot_calibration_by_depth(pred_all, model_name)
 p_cal
-
-
 
 res_gb <- compute_image_level_counts(
   calib_df  = get_data(model, model_name, "GB"),
@@ -49,17 +47,30 @@ res_mab <- compute_image_level_counts(
   model_name = model_name
 )
 
-str(res_gb)
+res_comb <- compute_image_level_counts_pooled(
+  calib_df = get_data(model, model_name, region = "ALL"),
+  gam_by_region = list(GB = gams$GB, MAB = gams$MAB),
+  region_col = "region",
+  model_name = model_name
+)
+
+res_comb$metrics_pooled
+res_comb$metrics_by_region
+
+# str(res_gb)
 
 img_all <- bind_rows(
   res_gb$img,
   res_mab$img
 )
 
+# img_all <- img_all |> mutate(region = "GB + MAB")
+
 metrics_all <- bind_rows(
   res_gb$metrics |> mutate(region = "GB"),
   res_mab$metrics |> mutate(region = "MAB")
 )
+
 
 p_counts <- plot_image_level_fit(
   img_df     = img_all,
@@ -67,6 +78,13 @@ p_counts <- plot_image_level_fit(
 )
 
 p_counts
+
+p_counts_pooled <- plot_image_level_fit(
+  img_df     = res_comb$img_all |> mutate(region = "GB + MAB"),
+  metrics_df = res_comb$metrics_pooled |> mutate(region = "GB + MAB")
+)
+
+p_counts_pooled
 
 p_counts_zoomed = plot_image_level_fit_zoom(img_all,
                           metrics_all,
@@ -80,5 +98,16 @@ save_cal(p_cal, id = paste("bydepth_",model_name,sep=""),
 save_cal(p_counts, id = paste("fit_",model_name,sep=""), 
          outdir = "../figures/")
 
+save_cal(p_counts_pooled, id = paste("fitpooled_",model_name,sep=""), 
+         outdir = "../figures/", width = 5, height = 6)
+
 save_cal(p_counts_zoomed, id = paste("fit_zoomed_",model_name,sep=""), 
          outdir = "../figures/")
+
+######
+vis.gam(gams$GB,
+        view = c("conf", "bottom_depth"),
+        plot.type = "contour")
+vis.gam(gams$GB,
+        view = c("conf", "bottom_depth"),
+        plot.type = "persp")

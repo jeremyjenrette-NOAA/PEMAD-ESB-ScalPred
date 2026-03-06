@@ -32,7 +32,7 @@ parse_timestamp_from_imagename <- function(x, tz = "UTC") {
     tz = tz
   )
 }
-
+  
 #============================================================#
 # Build by-detection and by-image datasets for calibration
 #============================================================#
@@ -91,12 +91,12 @@ build_detection_tables <- function(
   # 4) Compute bounding-box geometry
   #-------------------------------#
   
-  at <- at |>
-    mutate(
-      box_width  = abs(b_rx - t_lx),
-      box_height = abs(b_ry - t_ly),
-      box_area   = box_width * box_height
-    )
+  # at <- at |>
+  #   mutate(
+  #     box_width  = abs(b_rx - t_lx),
+  #     box_height = abs(b_ry - t_ly),
+  #     box_area   = box_width * box_height
+  #   )
   
   #-------------------------------#
   # 5) Build by-image summaries
@@ -149,6 +149,8 @@ build_detection_tables <- function(
           heading,
           o2,
           v_depth,
+          millimeter_per_pixel,
+          backscatter,
           # therm,
           pitch,
           roll
