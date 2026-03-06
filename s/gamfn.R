@@ -4,8 +4,8 @@ source("./gamfunc.R")
 load("../data/processed/Cas2024v2.RData")
 # load("../data/processed/YOLO2022.RData")
 
-model = YOLOv102022
-model_name = deparse(substitute(YOLOv102022))
+model = Cas2022v2
+model_name = deparse(substitute(Cas2022v2))
 
 gams_cal <- fit_calibration_gams(
   model = model,
@@ -102,3 +102,4 @@ ggplot(dat, aes(fn_prob, fn_pres)) +
   ) +
   theme_minimal()
 
+save_cal()

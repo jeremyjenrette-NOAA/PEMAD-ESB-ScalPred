@@ -104,8 +104,7 @@ fitfn_calibration_mod <- function(model, model_name, p_detect) {
   reg_comb = rbind(mab_img, gb_img)
   
   reg_comb <- reg_comb %>%
-    inner_join(p_detect, by = "image_id") %>%
-    filter(n_manual > 0)
+    inner_join(p_detect, by = "image_id")
   
   #------------------------------#
   # GB model
@@ -404,6 +403,7 @@ plot_image_level_fit_zoom <- function(img_df,
       y = "Manual count"
     )
 }
+
 
 save_cal <- function(p, id, outdir = "~/Downloads",
                        width = 6, height = 6) {

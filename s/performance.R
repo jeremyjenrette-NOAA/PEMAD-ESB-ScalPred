@@ -11,7 +11,7 @@ load("../data/processed/YOLOv72022.RData")
 # Analysis: Precision-Recall
 #============================================================#
 # out_pr <- evaluate_pr_models(list(YOLOv10_2022, YOLOv11_2022, YOLOv26_2022))
-out_pr <- evaluate_pr_models(list(YOLOv102022, YOLOv112022, YOLOv262022), 
+out_pr <- evaluate_pr_models(list(Cas2022v2, YOLOv72022), 
                              stratify_region = FALSE)
 
 
@@ -41,16 +41,16 @@ p_f1 <- ggplot(pr_all, aes(x = conf, y = f1, color = model)) +
   ) +
   
   # Text annotation
-  # geom_text(
-  #   data = best_pts,
-  #   aes(
-  #     label = sprintf("F1 = %.3f, conf = %.2f", f1, conf)
-  #   ),
-  #   hjust = 1,
-  #   vjust = -1,
-  #   size = 3.5,
-  #   show.legend = FALSE
-  # ) +
+  geom_text(
+    data = best_pts,
+    aes(
+      label = sprintf("F1 = %.3f, conf = %.2f", f1, conf)
+    ),
+    hjust = 1,
+    vjust = -1,
+    size = 3.5,
+    show.legend = FALSE
+  ) +
   
   theme_minimal() +
   labs(
