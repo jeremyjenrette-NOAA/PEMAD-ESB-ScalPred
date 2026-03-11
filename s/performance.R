@@ -5,13 +5,13 @@ load("../data/processed/YOLOv102022.RData")
 load("../data/processed/YOLOv112022.RData")
 load("../data/processed/YOLOv262022.RData")
 
-load("../data/processed/Cas2022v2.RData")
+load("../data/processed/Casv22022.RData")
 load("../data/processed/YOLOv72022.RData")
 #============================================================#
 # Analysis: Precision-Recall
 #============================================================#
 # out_pr <- evaluate_pr_models(list(YOLOv10_2022, YOLOv11_2022, YOLOv26_2022))
-out_pr <- evaluate_pr_models(list(Cas2022v2, YOLOv72022), 
+out_pr <- evaluate_pr_models(list(Casv22022, YOLOv72022), 
                              stratify_region = FALSE)
 
 

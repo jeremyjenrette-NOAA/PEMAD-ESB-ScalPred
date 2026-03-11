@@ -11,20 +11,25 @@ meta22 <- meta22[!duplicated(meta22$IMAGENAME), ]
 #============================================================#
 # read data
 #============================================================#
-at <- read.csv("../data/raw/2022scallop_yolov10n_242223/eval/autotest2022_yolov10n.csv") %>%
+at <- read.csv("../data/raw/2022scallop_yolo26n_243524/eval/autotest2022_yolo26n.csv") %>%
   mutate(truedetect = if_else(truedetect == "True", TRUE, FALSE)) %>%
   rename(spname = Spname) %>%
   rename(image_name = Imagename)
-mt <- read.csv("../data/raw/2022scallop_yolov10n_242223/eval/mantest2022_yolov10n.csv") %>%
+mt <- read.csv("../data/raw/2022scallop_yolo26n_243524/eval/mantest2022_yolo26n.csv") %>%
   rename(spname = Spname) %>%
   rename(image_name = Imagename)
 
 out <- build_detection_tables(mt, at, meta22)
 
-model_name <- "YOLOv102022"
+model_name <- "YOLOv72022"
 
 res <- structure_by_region(out, model_name, 
                            region_lat_cutoff = 40, 
                            save_rdata = TRUE)
 
 names(res)
+
+
+# meta22 = rbind(metagb, metamab)
+# at = read.csv("../data/raw/autotestyolo22.csv")
+# mt = read.csv("../data/raw/mantestyolo22.csv")

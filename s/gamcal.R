@@ -1,7 +1,8 @@
 library(tidyverse)
+library(mgcv)
 source("./gamfunc.R")
 
-load("../data/processed/Cas2022v2.RData")
+load("../data/processed/Casv22022.RData")
 load("../data/processed/YOLOv72022.RData")
 
 model = YOLOv262022
