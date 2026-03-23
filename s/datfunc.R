@@ -143,7 +143,7 @@ build_detection_tables <- function(
           cdom,
           altitude,
           field_of_view_sq_meter,
-          internal_ph,
+          # internal_ph,
           t,
           s,
           heading,

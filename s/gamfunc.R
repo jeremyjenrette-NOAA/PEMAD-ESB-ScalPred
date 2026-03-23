@@ -42,122 +42,6 @@ get_data <- function(model,
   model[[nm]]
 }
 
-fit_calibration_gams <- function(model, model_name) {
-  
-  gb_calib  <- get_data(model, model_name, "GB")
-  mab_calib <- get_data(model, model_name, "MAB")
-  comb <- rbind(gb_calib, mab_calib)
-  
-  m_gb <- mgcv::gam(
-    y ~ s(conf, bottom_depth, k = 3),
-      # s(conf, field_of_view_sq_meter, k = 7),
-      # s(latitude, longitude, k = 5),
-    family = binomial(),
-    data = gb_calib,
-    method = "REML"
-  )
-  
-  m_mab <- mgcv::gam(
-    y ~ s(conf, bottom_depth, k = 3),
-      # s(conf, field_of_view_sq_meter, k = 7),
-      # s(conf, latitude, k = 7) +
-      # s(conf, longitude, k = 7),
-    family = binomial(),
-    data = mab_calib,
-    method = "REML"
-  )
-  
-  m_comb <- gam(
-    y ~ 
-      s(conf, bottom_depth, k = 3),
-    family = binomial(),
-    data = comb,
-    method = "REML",
-    select = FALSE
-  )
-  
-  list(
-    model_name = model_name,
-    GB  = m_gb,
-    MAB = m_mab,
-    comb = m_comb
-  )
-}
-
-fitfn_calibration_mod <- function(model, model_name, p_detect) {
-  
-  gb_img  <- get_data(model, model_name, "GB", imglvl = TRUE)
-  mab_img <- get_data(model, model_name, "MAB", imglvl = TRUE)
-  
-  # Replace NA auto counts
-  gb_img$n_auto[is.na(gb_img$n_auto)] <- 0
-  mab_img$n_auto[is.na(mab_img$n_auto)] <- 0
-  
-  # Define FN presence
-  gb_img$fn_pres  <- as.integer(gb_img$n_auto < gb_img$n_manual)
-  mab_img$fn_pres <- as.integer(mab_img$n_auto < mab_img$n_manual)
-  
-  # Density term
-  gb_img$auto_density_log  <- log(gb_img$auto_density + 1e-6)
-  mab_img$auto_density_log <- log(mab_img$auto_density + 1e-6)
-  
-  reg_comb = rbind(mab_img, gb_img)
-  
-  reg_comb <- reg_comb %>%
-    inner_join(p_detect, by = "image_id")
-  
-  #------------------------------#
-  # GB model
-  #------------------------------#
-  
-  m_gb_fn <- mgcv::gam(
-    fn_pres ~
-      s(millimeter_per_pixel, k = 7),
-    family = binomial(),
-    data = gb_img,
-    method = "REML"
-  )
-  
-  #------------------------------#
-  # MAB model
-  #------------------------------#
-  
-  m_mab_fn <- mgcv::gam(
-    fn_pres ~
-      s(millimeter_per_pixel, k = 7),
-    family = binomial(),
-    data = mab_img,
-    method = "REML"
-  )
-  
-  #------------------------------#
-  # Combined region model
-  #------------------------------#
-  
-  # m_comb <- mgcv::gam(
-  #   fn_pres ~ s(predicted_number),
-  #   family = binomial(),
-  #   data = reg_comb,
-  #   method = "REML"
-  # )
-  
-  m_comb <- gam(
-    fn_pres ~ 
-      s(predicted_number, k=7),
-    family = binomial(),
-    data = reg_comb,
-    method = "REML"
-  )
-  
-  list(
-    model_name = model_name,
-    GB  = m_gb_fn,
-    MAB = m_mab_fn,
-    comb = m_comb,
-    data = reg_comb
-  )
-}
-
 make_depth_bins <- function(df, depth_col = "bottom_depth", breaks, digits = 0) {
   stopifnot(length(breaks) >= 2)
   
@@ -196,6 +80,8 @@ predict_calibration_by_depth <- function(gam,
   lat  <- median(calib_df$latitude,  na.rm = TRUE)
   lon  <- median(calib_df$longitude, na.rm = TRUE)
   fov  <- median(calib_df$field_of_view_sq_meter, na.rm = TRUE)
+  altitude <- median(calib_df$altitude, na.rm = TRUE)
+  backscatter <- median(calib_df$backscatter, na.rm = TRUE)
   
   pred <- tidyr::crossing(
     conf = conf_grid,
@@ -206,6 +92,8 @@ predict_calibration_by_depth <- function(gam,
       latitude = lat,
       longitude = lon,
       field_of_view_sq_meter = fov,
+      backscatter = backscatter,
+      altitude = altitude,
       region = region,
       model = model_name
     )
@@ -242,112 +130,173 @@ plot_calibration_by_depth <- function(pred_df, model_name) {
 compute_image_level_counts <- function(calib_df,
                                        gam,
                                        region,
-                                       model_name) {
+                                       model_name,
+                                       f1_thresh,
+                                       conf_col = "conf") {
   
   calib_df <- calib_df |>
-    dplyr::mutate(pred_p = stats::predict(gam, newdata = calib_df, type = "response"))
+    dplyr::mutate(
+      pred_p  = stats::predict(gam, newdata = calib_df, type = "response"),
+      conf_val = .data[[conf_col]]
+    )
   
   img <- calib_df |>
     dplyr::group_by(image_id) |>
     dplyr::summarise(
-      predicted_number = sum(pred_p, na.rm = TRUE),
-      true_number      = sum(y, na.rm = TRUE),
+      raw_detection_number = dplyr::n(),
+      predicted_f1_number  = sum(conf_val >= f1_thresh, na.rm = TRUE),
+      predicted_number     = sum(pred_p, na.rm = TRUE),
+      true_number          = sum(y, na.rm = TRUE),
       .groups = "drop"
     ) |>
     dplyr::mutate(region = region, model = model_name)
   
   metrics <- img |>
     dplyr::summarise(
-      r2   = summary(stats::lm(true_number ~ predicted_number))$adj.r.squared,
-      rmse = sqrt(mean((true_number - predicted_number)^2)),
-      .groups = "drop"
+      # calibrated GAM counts
+      r2_calibrated   = summary(stats::lm(true_number ~ predicted_number))$adj.r.squared,
+      rmse_calibrated = sqrt(mean((true_number - predicted_number)^2)),
+      
+      # F1-threshold counts
+      r2_f1   = summary(stats::lm(true_number ~ predicted_f1_number))$adj.r.squared,
+      rmse_f1 = sqrt(mean((true_number - predicted_f1_number)^2))
     )
   
   list(img = img, metrics = metrics)
 }
 
-# ------------------------------------------------------------
-# NEW: combine regional GAM predictions and compute pooled metrics
-# ------------------------------------------------------------
-compute_image_level_counts_pooled <- function(
-    calib_df,
-    gam_by_region,                 # named list: list(GB = gam_gb, MAB = gam_mab)
-    region_col   = "region",
-    model_name   = "MyModel",
-    pooled_label = "ALL"
-) {
-  if (!region_col %in% names(calib_df)) stop("calib_df must contain column: ", region_col)
+compute_combined_metrics <- function(img_df, region_name = "GB_MAB") {
   
-  img_list <- lapply(names(gam_by_region), function(r) {
-    df_r <- calib_df |> dplyr::filter(.data[[region_col]] == r)
-    if (nrow(df_r) == 0) return(NULL)
-    
-    # predict with the region GAM
-    df_r <- df_r |>
-      dplyr::mutate(pred_p = stats::predict(gam_by_region[[r]], newdata = df_r, type = "response"))
-    
-    # image-level sums
-    df_r |>
-      dplyr::group_by(image_id) |>
-      dplyr::summarise(
-        predicted_number = sum(pred_p, na.rm = TRUE),
-        true_number      = sum(y, na.rm = TRUE),
-        .groups = "drop"
-      ) |>
-      dplyr::mutate(region = r, model = model_name)
-  })
-  
-  img_all <- dplyr::bind_rows(img_list)
-  if (nrow(img_all) == 0) stop("No rows produced. Check region names vs calib_df[[region_col]].")
-  
-  metrics_pooled <- img_all |>
+  img_df |>
     dplyr::summarise(
-      r2   = summary(stats::lm(true_number ~ predicted_number))$adj.r.squared,
-      rmse = sqrt(mean((true_number - predicted_number)^2)),
-      n_images = dplyr::n(),
-      .groups = "drop"
+      r2_calibrated   = summary(stats::lm(true_number ~ predicted_number))$adj.r.squared,
+      rmse_calibrated = sqrt(mean((true_number - predicted_number)^2)),
+      r2_f1           = summary(stats::lm(true_number ~ predicted_f1_number))$adj.r.squared,
+      rmse_f1         = sqrt(mean((true_number - predicted_f1_number)^2))
     ) |>
-    dplyr::mutate(region = pooled_label, model = model_name)
-  
-  metrics_by_region <- img_all |>
-    dplyr::group_by(region, model) |>
-    dplyr::summarise(
-      r2   = summary(stats::lm(true_number ~ predicted_number))$adj.r.squared,
-      rmse = sqrt(mean((true_number - predicted_number)^2)),
-      n_images = dplyr::n(),
-      .groups = "drop"
-    )
-  
-  list(img_all = img_all, metrics_pooled = metrics_pooled, metrics_by_region = metrics_by_region)
+    dplyr::mutate(region = region_name)
 }
 
-plot_image_level_fit <- function(img_df, metrics_df) {
+
+plot_image_level_fit <- function(img_df,
+                                 metrics_df,
+                                 model_name = "",
+                                 include_f1 = FALSE,
+                                 free_scales = TRUE,
+                                 plot_title) {
   
-  metrics_df <- metrics_df |>
-    mutate(
-      label = paste0(
-        "R² = ", round(r2, 2), "\n",
-        "RMSE = ", round(rmse, 2)
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  
+  # Build plotting dataframe
+  if (include_f1) {
+    plot_df <- img_df |>
+      dplyr::select(region, true_number, predicted_number, predicted_f1_number) |>
+      tidyr::pivot_longer(
+        cols = c(predicted_number, predicted_f1_number),
+        names_to = "method",
+        values_to = "predicted_value"
+      ) |>
+      dplyr::mutate(
+        method = dplyr::recode(
+          method,
+          predicted_number    = "GAM Calibrated",
+          predicted_f1_number = "F1 cutoff"
+        )
       )
-    )
+    
+    metrics_plot <- metrics_df |>
+      dplyr::transmute(
+        region,
+        method = "GAM Calibrated",
+        r2 = r2_calibrated,
+        rmse = rmse_calibrated
+      ) |>
+      dplyr::bind_rows(
+        metrics_df |>
+          dplyr::transmute(
+            region,
+            method = "F1 cutoff",
+            r2 = r2_f1,
+            rmse = rmse_f1
+          )
+      ) |>
+      dplyr::mutate(
+        label = paste0(
+          "R² = ", round(r2, 2), "\n",
+          "RMSE = ", round(rmse, 2)
+        )
+      )
+    
+    p <- ggplot(plot_df, aes(predicted_value, true_number)) +
+      geom_abline(
+        slope = 1, intercept = 0,
+        linetype = "dashed", color = "grey40"
+      ) +
+      geom_point(color = "red", size = 1) +
+      geom_text(
+        data = metrics_plot,
+        aes(x = -Inf, y = Inf, label = label),
+        hjust = -0.5, vjust = 1.5,
+        inherit.aes = FALSE
+      ) +
+      facet_grid(
+        rows = vars(method),
+        cols = vars(region),
+        scales = if (free_scales) "free" else "fixed"
+      ) +
+      theme_minimal(base_size = 13) +
+      labs(
+        title = plot_title,
+        x = "Predicted count",
+        y = "Manual count"
+      )
+    
+  } else {
+    plot_df <- img_df |>
+      dplyr::mutate(method = "GAM Calibrated",
+                    predicted_value = predicted_number)
+    
+    metrics_plot <- metrics_df |>
+      dplyr::transmute(
+        region,
+        method = "GAM Calibrated",
+        r2 = r2_calibrated,
+        rmse = rmse_calibrated
+      ) |>
+      dplyr::mutate(
+        label = paste0(
+          "R² = ", round(r2, 2), "\n",
+          "RMSE = ", round(rmse, 2)
+        )
+      )
+    
+    p <- ggplot(plot_df, aes(predicted_value, true_number)) +
+      geom_abline(
+        slope = 1, intercept = 0,
+        linetype = "dashed", color = "grey40"
+      ) +
+      geom_point(color = "red", size = 1) +
+      geom_text(
+        data = metrics_plot,
+        aes(x = -Inf, y = Inf, label = label),
+        hjust = -0.5, vjust = 1,
+        inherit.aes = FALSE
+      ) +
+      facet_grid(
+        ~ region,
+        scales = if (free_scales) "free" else "fixed"
+      ) +
+      theme_minimal(base_size = 13) +
+      labs(
+        title = plot_title,
+        x = "Predicted (Σ calibrated p)",
+        y = "Manual count"
+      )
+  }
   
-  ggplot(img_df, aes(predicted_number, true_number)) +
-    geom_abline(slope = 1, intercept = 0,
-                linetype = "dashed", color = "grey40") +
-    geom_point(color = "red", size = 1) +
-    facet_grid(~ region, scales = "free") +
-    geom_text(
-      data = metrics_df,
-      aes(x = -Inf, y = Inf, label = label),
-      hjust = -0.5, vjust = 1,
-      inherit.aes = FALSE
-    ) +
-    theme_minimal(base_size = 13) +
-    labs(
-      title = paste(model_name, " - True vs Σ P(detection)",sep=""),
-      x = "Predicted (Σ calibrated p)",
-      y = "Manual count"
-    )
+  p
 }
 
 compute_zoom_limits <- function(df, x, y, q = 0.9) {
@@ -365,8 +314,8 @@ plot_image_level_fit_zoom <- function(img_df,
   metrics_df <- metrics_df |>
     mutate(
       label = paste0(
-        "R² = ", round(r2, 2), "\n",
-        "RMSE = ", round(rmse, 2)
+        "R² = ", round(r2_calibrated, 2), "\n",
+        "RMSE = ", round(rmse_calibrated, 2)
       )
     )
   
@@ -405,13 +354,28 @@ plot_image_level_fit_zoom <- function(img_df,
 }
 
 
-save_cal <- function(p, id, outdir = "~/Downloads",
-                       width = 6, height = 6) {
+save_cal <- function(p,
+                     id,
+                     outdir = "~/Downloads",
+                     format = "jpg",
+                     width = 6,
+                     height = 6,
+                     dpi = 300) {
+  
+  format <- tolower(format)
+  allowed <- c("jpg", "jpeg", "png", "pdf")
+  
+  if (!format %in% allowed) {
+    stop("format must be one of: jpg, jpeg, png, pdf")
+  }
+  
+  filename <- file.path(outdir, paste0(id, ".", format))
   
   ggsave(
     plot = p,
-    filename = file.path(outdir, paste0(id, ".jpg")),
+    filename = filename,
     width = width,
-    height = height
+    height = height,
+    dpi = dpi
   )
 }

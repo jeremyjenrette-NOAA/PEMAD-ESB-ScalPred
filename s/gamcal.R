@@ -1,12 +1,14 @@
 library(tidyverse)
 library(mgcv)
 source("./gamfunc.R")
+source("./fitfunc.R")
+source("./procfunc.R")
 
-load("../data/processed/Casv22022.RData")
-load("../data/processed/YOLOv72022.RData")
+load("../data/processed/Casfixed2022.RData")
+load("../data/processed/YOLOv112022.RData")
 
-model = YOLOv262022
-model_name = deparse(substitute(YOLOv262022))
+model = Cas2224
+model_name = deparse(substitute(Cas2224))
 
 gams <- fit_calibration_gams(
   model = model,
@@ -33,78 +35,82 @@ pred_all <- bind_rows(pred_gb, pred_mab)
 
 p_cal <- plot_calibration_by_depth(pred_all, model_name)
 p_cal
-
+#######################################################
+out_pr <- evaluate_pr_models(list(model), 
+                             stratify_region = TRUE)
+pr_all <- out_pr$pr_all
+best_pts <- pr_all %>%
+  group_by(model) %>%
+  filter(f1 == max(f1, na.rm = TRUE)) %>%
+  slice_max(conf, n = 1) %>%   # break ties by confidence
+  ungroup()
+f1conf_gb = best_pts$conf[1]
+f1conf_mab = best_pts$conf[2]
+#######################################################
 res_gb <- compute_image_level_counts(
   calib_df  = get_data(model, model_name, "GB"),
   gam       = gams$GB,
   region    = "GB",
-  model_name = model_name
+  model_name = model_name,
+  f1_thresh = f1conf_gb
 )
 
 res_mab <- compute_image_level_counts(
   calib_df  = get_data(model, model_name, "MAB"),
   gam       = gams$MAB,
   region    = "MAB",
-  model_name = model_name
+  model_name = model_name,
+  f1_thresh = f1conf_mab
 )
-
-res_comb <- compute_image_level_counts_pooled(
-  calib_df = get_data(model, model_name, region = "ALL"),
-  gam_by_region = list(GB = gams$GB, MAB = gams$MAB),
-  region_col = "region",
-  model_name = model_name
-)
-
-res_comb$metrics_pooled
-res_comb$metrics_by_region
-
-# str(res_gb)
 
 img_all <- bind_rows(
   res_gb$img,
   res_mab$img
 )
 
-# img_all <- img_all |> mutate(region = "GB + MAB")
-
-metrics_all <- bind_rows(
-  res_gb$metrics |> mutate(region = "GB"),
-  res_mab$metrics |> mutate(region = "MAB")
+metrics_all <- dplyr::bind_rows(
+  res_gb$metrics  |> dplyr::mutate(region = "GB"),
+  res_mab$metrics |> dplyr::mutate(region = "MAB"),
+  compute_combined_metrics(img_all, region_name = "All Survey Regions")
 )
-
 
 p_counts <- plot_image_level_fit(
-  img_df     = img_all,
-  metrics_df = metrics_all
+  img_df = img_all, # |> dplyr::mutate(region = "All Surveys 2022"),
+  metrics_df = metrics_all[1:2,],
+  model_name = model_name,
+  include_f1 = FALSE,
+  plot_title = paste(model_name, " True vs. Predicted Count", sep = " -")
 )
-
 p_counts
 
 p_counts_pooled <- plot_image_level_fit(
-  img_df     = res_comb$img_all |> mutate(region = "GB + MAB"),
-  metrics_df = res_comb$metrics_pooled |> mutate(region = "GB + MAB")
+  img_df = img_all |> dplyr::mutate(region = "All Survey Regions"),
+  metrics_df = metrics_all[3,],
+  model_name = model_name,
+  include_f1 = FALSE,
+  plot_title = paste(model_name, " True vs. Predicted Count", sep = " -")
 )
-
 p_counts_pooled
 
-p_counts_zoomed = plot_image_level_fit_zoom(img_all,
-                          metrics_all,
-                          model_name,
-                          zoom_q = 0.85)
-p_counts_zoomed
+p_zoomed <- plot_image_level_fit_zoom(
+  img_df = img_all |> dplyr::mutate(region = "All Survey Regions"),
+  metrics_df = metrics_all[3,],
+  model_name = model_name,
+  zoom_q=0.95
+)
+p_zoomed
 
 save_cal(p_cal, id = paste("bydepth_",model_name,sep=""), 
-         outdir = "../figures/")
+         outdir = "../figures/", format = "png", width = 7)
 
 save_cal(p_counts, id = paste("fit_",model_name,sep=""), 
-         outdir = "../figures/")
+         outdir = "../figures/", format = "png")
 
 save_cal(p_counts_pooled, id = paste("fitpooled_",model_name,sep=""), 
-         outdir = "../figures/", width = 5, height = 6)
+         outdir = "../figures/", width = 5, height = 7, format = "png")
 
-save_cal(p_counts_zoomed, id = paste("fit_zoomed_",model_name,sep=""), 
-         outdir = "../figures/")
-
+save_cal(p_zoomed, id = paste("fit_zoomedALL_",model_name,sep=""), 
+         outdir = "../figures/", width = 5, height = 7, format = "png")
 ######
 vis.gam(gams$GB,
         view = c("conf", "bottom_depth"),

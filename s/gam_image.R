@@ -1,5 +1,6 @@
 library(tidyverse)
 source("./gamfunc.R")
+source("./fitfunc.R")
 
 load("../data/processed/Cas2024v2.RData")
 # load("../data/processed/YOLO2022.RData")
