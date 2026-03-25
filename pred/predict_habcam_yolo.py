@@ -4,6 +4,7 @@ import os
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 
+from PIL import Image
 import argparse
 import sys
 import time
@@ -13,6 +14,34 @@ from typing import List, Dict, Any
 import torch
 from ultralytics import YOLO
 import pandas as pd
+
+def load_and_split_image(image_path: str, split: str = "none"):
+    """
+    Load an image and optionally return only the left or right half.
+
+    Parameters
+    ----------
+    image_path : str
+        Path to image on disk.
+    split : str
+        One of: 'none', 'left', 'right'
+
+    Returns
+    -------
+    PIL.Image.Image
+        Original or split image.
+    """
+    img = Image.open(image_path).convert("RGB")
+    w, h = img.size
+
+    if split == "none":
+        return img
+    elif split == "left":
+        return img.crop((0, 0, w // 2, h))
+    elif split == "right":
+        return img.crop((w // 2, 0, w, h))
+    else:
+        raise ValueError(f"Invalid split option: {split}")
 
 def normalize_windows_path(path: str) -> str:
     """
@@ -112,6 +141,8 @@ def build_detection_rows(
     result,
     image_path: str,
     imagename: str,
+    split_mode: str = "none",
+    model_name_des: str = "none",
     default_label: str = "scallop"
 ) -> List[Dict[str, Any]]:
     """
@@ -144,7 +175,9 @@ def build_detection_rows(
             "Conf": float(conf) if conf is not None else None,
             "Spname": label,
             "img_path": image_path,
+            "split": split_mode,
             "pred_datetime": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "model": model_name_des
         })
 
     return rows
@@ -152,8 +185,10 @@ def build_detection_rows(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Resumable YOLO inference over HabCam inventory.")
+    parser.add_argument("--split", default="none", choices=["none", "left", "right"], help="Use whole image or split stereo pair before inference")
     parser.add_argument("--model", required=True, help="Path to YOLO .pt weights")
     parser.add_argument("--inventory", required=True, help="Compiled inventory TSV/CSV")
+    parser.add_argument("--model_name", required=True, help="YOLOv12")
     parser.add_argument("--outdir", required=True, help="Output directory")
     parser.add_argument("--year", default=None, help="Year to process, e.g. 2022")
     parser.add_argument("--device", default="0", help="CUDA device, e.g. 0 or 1")
@@ -194,6 +229,8 @@ def main() -> None:
 
     model = YOLO(args.model)
     file_log(f"Model loaded: {args.model}")
+    
+    file_log(f"Split mode: {args.split}")
 
     processed_this_run = 0
     detections_this_run = 0
@@ -211,8 +248,10 @@ def main() -> None:
             continue
 
         try:
+            img_for_pred = load_and_split_image(image_path, split=args.split)
+            
             results = model.predict(
-                source=image_path,
+                source=img_for_pred,
                 device=args.device,
                 conf=args.conf,
                 iou=args.nms_iou,
@@ -224,7 +263,7 @@ def main() -> None:
 
             det_rows: List[Dict[str, Any]] = []
             for res in results:
-                det_rows.extend(build_detection_rows(res, image_path=image_path, imagename=imagename))
+                det_rows.extend(build_detection_rows(res, image_path=image_path, imagename=imagename, split_mode=args.split, model_name_des=args.model_name))
 
             append_detection_rows(detections_csv, det_rows)
             append_completed(completed_txt, image_path)
