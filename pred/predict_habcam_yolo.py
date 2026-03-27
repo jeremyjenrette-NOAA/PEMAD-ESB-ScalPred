@@ -15,31 +15,20 @@ import torch
 from ultralytics import YOLO
 import pandas as pd
 
+def chunk_list(items, batch_size):
+    for i in range(0, len(items), batch_size):
+        yield items[i:i + batch_size]
+
 def load_and_split_image(image_path: str, split: str = "none"):
-    """
-    Load an image and optionally return only the left or right half.
-
-    Parameters
-    ----------
-    image_path : str
-        Path to image on disk.
-    split : str
-        One of: 'none', 'left', 'right'
-
-    Returns
-    -------
-    PIL.Image.Image
-        Original or split image.
-    """
     img = Image.open(image_path).convert("RGB")
     w, h = img.size
 
     if split == "none":
-        return img
+        return img, 0
     elif split == "left":
-        return img.crop((0, 0, w // 2, h))
+        return img.crop((0, 0, w // 2, h)), 0
     elif split == "right":
-        return img.crop((w // 2, 0, w, h))
+        return img.crop((w // 2, 0, w, h)), w // 2
     else:
         raise ValueError(f"Invalid split option: {split}")
 
@@ -98,6 +87,9 @@ def load_inventory(inventory_path: Path, year: str | None = None) -> pd.DataFram
     df = df.copy()
     df["process_image"] = df["process_image"].astype(bool)
 
+    df["actual_path_raw"] = df["actual_path"].astype(str)
+    df["actual_path"] = df["actual_path_raw"].apply(normalize_windows_path)
+
     if "year" in df.columns:
         df["year"] = df["year"].astype(str)
     else:
@@ -141,6 +133,7 @@ def build_detection_rows(
     result,
     image_path: str,
     imagename: str,
+    x_offset: int = 0,
     split_mode: str = "none",
     model_name_des: str = "none",
     default_label: str = "scallop"
@@ -198,6 +191,7 @@ def main() -> None:
     parser.add_argument("--max_detections", type=int, default=300, help="Maximum detections per image")
     parser.add_argument("--save", action="store_true", help="Save annotated prediction images")
     parser.add_argument("--save_every", type=int, default=100, help="Log progress every N images")
+    parser.add_argument("--batch_size", type=int, default=16, help="Number of images per inference batch")
     args = parser.parse_args()
 
     outdir = Path(args.outdir)
@@ -235,23 +229,49 @@ def main() -> None:
     processed_this_run = 0
     detections_this_run = 0
 
-    for idx, row in inventory.iterrows():
-        image_path_raw = str(row["actual_path"])
-        image_path = normalize_windows_path(image_path_raw)
-        imagename = str(row["imagename"])
-        
-        if not os.path.exists(image_path):
-            msg = f"MISSING\t{image_path_raw}\tWINDOWS_PATH\t{image_path}"
-            with errors_txt.open("a", encoding="utf-8") as f:
-                f.write(msg + "\n")
-            append_completed(completed_txt, image_path)
+    records = inventory.to_dict("records")
+
+    for batch_idx, batch_rows in enumerate(chunk_list(records, args.batch_size), start=1):
+        batch_images = []
+        batch_meta = []
+
+        for row in batch_rows:
+            image_path = str(row["actual_path"])
+            image_path_raw = str(row["actual_path_raw"]) if "actual_path_raw" in row else image_path
+            imagename = str(row["imagename"])
+
+            if not os.path.exists(image_path):
+                msg = f"MISSING\t{image_path_raw}\tWINDOWS_PATH\t{image_path}"
+                with errors_txt.open("a", encoding="utf-8") as f:
+                    f.write(msg + "\n")
+                append_completed(completed_txt, image_path)
+                continue
+
+            try:
+                img_for_pred, x_offset = load_and_split_image(
+                    image_path,
+                    split=args.split
+                )
+
+                batch_images.append(img_for_pred)
+                batch_meta.append({
+                    "image_path": image_path,
+                    "imagename": imagename,
+                    "x_offset": x_offset
+                })
+
+            except Exception as e:
+                msg = f"ERROR\t{image_path}\t{repr(e)}"
+                with errors_txt.open("a", encoding="utf-8") as f:
+                    f.write(msg + "\n")
+                continue
+
+        if len(batch_images) == 0:
             continue
 
         try:
-            img_for_pred = load_and_split_image(image_path, split=args.split)
-            
             results = model.predict(
-                source=img_for_pred,
+                source=batch_images,
                 device=args.device,
                 conf=args.conf,
                 iou=args.nms_iou,
@@ -261,28 +281,32 @@ def main() -> None:
                 verbose=False,
             )
 
-            det_rows: List[Dict[str, Any]] = []
-            for res in results:
-                det_rows.extend(build_detection_rows(res, image_path=image_path, imagename=imagename, split_mode=args.split, model_name_des=args.model_name))
+            for res, meta in zip(results, batch_meta):
+                det_rows = build_detection_rows(
+                    res,
+                    image_path=meta["image_path"],
+                    imagename=meta["imagename"],
+                    x_offset=meta["x_offset"],
+                    split_mode=args.split,
+                    model_name_des=args.model_name
+                )
 
-            append_detection_rows(detections_csv, det_rows)
-            append_completed(completed_txt, image_path)
+                append_detection_rows(detections_csv, det_rows)
+                append_completed(completed_txt, meta["image_path"])
 
-            processed_this_run += 1
-            detections_this_run += len(det_rows)
+                processed_this_run += 1
+                detections_this_run += len(det_rows)
 
             if processed_this_run % args.save_every == 0:
                 file_log(
                     f"Processed {processed_this_run} images this run | "
-                    f"current image: {imagename} | "
-                    f"total detections written: {detections_this_run}"
+                    f"batch {batch_idx} | total detections written: {detections_this_run}"
                 )
 
         except Exception as e:
-            msg = f"ERROR\t{image_path}\t{repr(e)}"
+            msg = f"BATCH_ERROR\tbatch={batch_idx}\t{repr(e)}"
             with errors_txt.open("a", encoding="utf-8") as f:
                 f.write(msg + "\n")
-            # Do not mark completed on exception; rerun can retry this image.
             continue
 
     file_log(f"Run complete | images processed: {processed_this_run} | detections written: {detections_this_run}")
