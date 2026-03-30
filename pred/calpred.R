@@ -5,9 +5,11 @@ library(mgcv)
 library(dplyr)
 library(ggplot2)
 library(maps)
+library(scales)
 library(lubridate)
 source("../s/gamfunc.R")
 source("../s/fitfunc.R")
+source("../s/procfunc.R")
 source("./predfunc.R")
 
 load("../data/processed/YOLOv122224.RData")
@@ -19,10 +21,11 @@ gams <- fit_calibration_gams(
   model = model,
   model_name = model_name
 )
-gams$GB
+summary(gams$GB)
 ########################################################################
 # Load predictions + metadata
 pred_detections = rbind(
+  read.csv("../data/raw/2022_pred/detections_2022.csv") %>% mutate(year = 2022),
   read.csv("../data/raw/2023_pred/detections_2023.csv") %>% mutate(year = 2023),
   read.csv("../data/raw/2024_pred/detections_2024.csv") %>% mutate(year = 2024)
 )
@@ -30,6 +33,10 @@ colnames(pred_detections)
 table(pred_detections$year)
 
 pred_allimgs = rbind(
+  (read.table("../data/raw/2022_pred/completed_2022.txt") %>%
+     rename(Imagename = V1) %>%
+     mutate(Imagename = basename(Imagename),
+            year = 2022)),
   (read.table("../data/raw/2023_pred/completed_2023.txt") %>%
   rename(Imagename = V1) %>%
   mutate(Imagename = basename(Imagename),
@@ -42,6 +49,7 @@ pred_allimgs = rbind(
 table(pred_allimgs$year)
 
 meta = rbind(
+  read.csv("../data/raw/metapred/processedimages22.csv"),
   read.csv("../data/raw/metapred/processedimages23.csv"),
   read.csv("../data/raw/metapred/processedimages24.csv")
 )
@@ -75,10 +83,13 @@ df <- img_inventory %>%
 
 p_img_bytime = ggplot(df, aes(x = factor(year_month, levels = unique(year_month)), y = n)) +
   geom_col(fill = "#2C7BB6") +
+  scale_y_continuous(
+    labels = label_number(scale = 1e-6, suffix = " mil", accuracy = 0.1)
+  ) +
   labs(
     x = "Year-Month",
     y = "Number of Images",
-    title = "Temporal distribution of processed images 2022–2024"
+    title = "HabCam survey images 2022–2024"
   ) +
   theme_minimal(base_size = 12) +
   theme(
@@ -87,6 +98,7 @@ p_img_bytime = ggplot(df, aes(x = factor(year_month, levels = unique(year_month)
     panel.grid.major = element_blank(),
     plot.title = element_text(face = "bold")
   )
+p_img_bytime
 
 p_fps = ggplot(img_inventory, aes(x = factor(year), y = 1/dt, fill = factor(year))) +
   geom_violin(alpha = 0.7, trim = FALSE, scale = "width") +
@@ -103,15 +115,28 @@ save_cal(p = p_img_bytime, id = "2224_img_bytime", width = 6, height = 6)
 save_cal(p = p_fps, id = "2224_fps", width = 6)
 
 ########################################################################
+out_pr <- evaluate_pr_models(list(model), 
+                             stratify_region = TRUE)
+pr_all <- out_pr$pr_all
+best_pts <- pr_all %>%
+  group_by(model) %>%
+  filter(f1 == max(f1, na.rm = TRUE)) %>%
+  slice_max(conf, n = 1) %>%   # break ties by confidence
+  ungroup()
+f1conf_gb = best_pts$conf[1]
+f1conf_mab = best_pts$conf[2]
 
 out <- compile_calibrated_image_df(
   gams = gams,
   pred_detections = pred_detections,
   pred_allimgs = pred_allimgs,
-  meta = meta
+  meta = meta,
+  f1conf_gb = f1conf_gb,
+  f1conf_mab = f1conf_mab
 )
 
 img_level_final  <- out$img_level_final
+img_level_final_f1 <- out$img_level_final_f1
 pred_calibrated  <- out$pred_calibrated
 pred_master      <- out$pred_master
 
@@ -132,33 +157,36 @@ p_totalcal = ggplot(img_level_final, aes(x = raw_detection_number, y = predicted
   geom_smooth(method = "lm", color = "red", se = FALSE) +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
   labs(
-    x = "Raw detections (YOLO)",
-    y = "Calibrated count (Σ p(detection))",
-    title = "Calibration effect: raw vs calibrated counts"
+    x = "Detection (YOLO)",
+    y = "Predicted count",
+    title = "Detection vs calibrated count"
   ) +
   theme_minimal()
 save_cal(p = p_totalcal, outdir = "../figures/", id = "2224_totalcal", width = 6)
 
-lims <- quantile(
-  c(img_level_final$raw_detection_number,
-    img_level_final$predicted_number),
-  probs = c(0.05, 0.975),
-  na.rm = TRUE
-)
-
-p_totalcal +
-  coord_cartesian(
-    xlim = lims,
-    ylim = lims
-  )
+# lims <- quantile(
+#   c(img_level_final$raw_detection_number,
+#     img_level_final$predicted_number),
+#   probs = c(0.05, 0.975),
+#   na.rm = TRUE
+# )
+# 
+# p_totalcal +
+#   coord_cartesian(
+#     xlim = lims,
+#     ylim = lims
+#   )
 
 world <- map_data("world")
 
 df <- img_level_final %>%
-  filter(year == 2024) %>%
-  mutate(density_cal_plot = density_cal + 1e-6)
+  filter(year %in% c(2022, 2024)) %>%
+  mutate(
+    density_cal_plot = density_cal + 1e-6,
+    year = factor(year, levels = c(2022, 2024))
+  )
 
-p_mapcal = ggplot() +
+p_mapcal <- ggplot() +
   geom_polygon(
     data = world,
     aes(x = long, y = lat, group = group),
@@ -184,12 +212,14 @@ p_mapcal = ggplot() +
     xlim = range(df$longitude, na.rm = TRUE),
     ylim = range(df$latitude, na.rm = TRUE)
   ) +
+  facet_wrap(~ year) +
   labs(
-    title = "2024 - Calibrated scallop density",
-    color = "Log Density (n/m²)"
+    title = "Predicted scallop density by year",
+    color = "Density (n/m²)"
   ) +
   theme_minimal()
-save_cal(p = p_mapcal, outdir = "../figures/", id = "2224_mapcal", width = 7.5)
+save_cal(p = p_mapcal, outdir = "../figures/", id = "2224_mapcal", 
+         width = 7.5, height = 5.5)
 
 p_densedepth = ggplot(img_level_final, aes(x = bottom_depth, y = density_cal)) +
   geom_point(alpha = 0.2) +
@@ -198,11 +228,12 @@ p_densedepth = ggplot(img_level_final, aes(x = bottom_depth, y = density_cal)) +
   labs(
     x = "Bottom depth",
     y = "Density (n/m²)",
-    title = "Depth vs calibrated density"
+    title = "Density at depth"
   ) +
   theme_minimal()
 save_cal(p = p_densedepth, outdir = "../figures/", id = "2224_densedepth", width = 6)
 
+# should facet this by region
 p_caldepth = plot_calibration_by_depth_envelopes(
   pred_calibrated,
   depth_envelopes = list(c(10, 60), c(60, 110), c(110, 160))
@@ -229,9 +260,9 @@ p_corr = pred_calibrated %>%
   geom_point(alpha = 0.1) +
   geom_smooth(method = "gam", formula = y ~ s(x), color = "red") +
   labs(
-    x = "YOLO confidence",
+    x = "Detection confidence",
     y = "P(detection) - confidence",
-    title = "Confidence correction"
+    title = "Confidence correction (YOLO)"
   ) +
   theme_minimal()
 save_cal(p = p_corr, outdir = "../figures/", id = "2224_corr", width = 7)
@@ -262,7 +293,8 @@ p_pdist = ggplot(pred_calibrated, aes(x = p_detection)) +
   labs(
     x = expression(P(detection)),
     y = "Count",
-    title = "Distribution of p(detection)"
+    title = "Distribution of p(detection)",
+    subtitle = "YOLOv12"
   ) +
   theme_minimal(base_size = 14) +
   theme(
@@ -272,7 +304,7 @@ p_pdist = ggplot(pred_calibrated, aes(x = p_detection)) +
   )
 save_cal(p = p_pdist, outdir = "../figures/", id = "2224_dpist", width = 7)
 
-
+# facet below plot by region
 x_pos <- max(img_level_final$bottom_depth, na.rm = TRUE)
 
 y_raw <- mean(img_level_final$density_raw, na.rm = TRUE)
@@ -285,7 +317,7 @@ p_rawcaldepth = ggplot(img_level_final, aes(x = bottom_depth)) +
   annotate("text",
            x = x_pos,
            y = y_raw,
-           label = "Raw density",
+           label = "Detection density",
            color = "red",
            hjust = 1.1,
            size = 4.5) +
@@ -311,27 +343,22 @@ p_rawcaldepth = ggplot(img_level_final, aes(x = bottom_depth)) +
   )
 save_cal(p = p_rawcaldepth, outdir = "../figures/", id = "2224_rawcaldepth", width = 7)
 
-img_level_final %>%
-  arrange(desc(raw_detection_number)) %>%
-  mutate(rank = row_number()) %>%
-  ggplot(aes(rank)) +
-  geom_line(aes(y = raw_detection_number), color = "red") +
-  geom_line(aes(y = predicted_number), color = "blue") +
-  labs(
-    x = "Image rank",
-    y = "Count",
-    title = "Detection yield: raw vs calibrated"
+p_lengthdist <- ggplot(pred_lengths, aes(x = length_mm, weight = p_detection)) +
+  geom_histogram(
+    bins = 50,
+    fill = "darkgreen",
+    color = "white",
+    alpha = 0.9
   ) +
-  theme_minimal()
-
-
-p_lengthdist = ggplot(pred_lengths, aes(x = length_mm, weight = p_detection)) +
-  geom_histogram(bins = 50, fill = "darkgreen", color = "white", alpha = 0.9) +
-  xlim(0,150) +
+  facet_wrap(~ year) +
+  xlim(0, 150) +
+  scale_y_continuous(
+    labels = label_number(scale = 1e-3, suffix = "k", accuracy = 1)
+  ) +
   labs(
     x = "Estimated scallop length (mm)",
     y = "Expected number of individuals",
-    title = "Expected scallop size distribution"
+    title = "Expected scallop size distribution by year"
   ) +
   theme_minimal()
 p_lengthdist
