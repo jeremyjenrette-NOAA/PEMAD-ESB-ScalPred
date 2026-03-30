@@ -152,6 +152,71 @@ pred_lengths <- pred_calibrated %>%
     length_mm = length_px * millimeter_per_pixel
   )
 
+year_summary <- img_level_final %>%
+  group_by(year) %>%
+  summarise(
+    total_p_detection = sum(predicted_number, na.rm = TRUE),
+    total_density_cal = sum(density_cal, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  left_join(
+    img_level_final_f1 %>%
+      group_by(year) %>%
+      summarise(
+        total_raw_detection_f1 = sum(predicted_number_f1, na.rm = TRUE),
+        total_density_f1 = sum(density_f1, na.rm = TRUE),
+        .groups = "drop"
+      ),
+    by = "year"
+  )
+
+plot_df <- year_summary %>%
+  select(year, total_density_cal, total_density_f1) %>%
+  pivot_longer(
+    cols = c(total_density_cal, total_density_f1),
+    names_to = "method",
+    values_to = "density"
+  ) %>%
+  mutate(
+    method = recode(method,
+                    total_density_cal = "GAM (calibrated)",
+                    total_density_f1  = "F1 threshold"
+    )
+  )
+
+p_summ = ggplot(plot_df, aes(x = factor(year), y = density, fill = method)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(
+    values = c(
+      "GAM (calibrated)" = "#1B9E77",
+      "F1 threshold"     = "#D95F02"
+    )
+  ) +
+  scale_y_continuous(
+    labels = scales::label_number(scale = 1e-3, suffix = "k")
+  ) +
+  labs(
+    x = "Year",
+    y = "Total scallop density (n/m²)",
+    fill = "Method",
+    title = "Comparison of abundance estimation methods by year"
+  ) +
+  theme_minimal()
+save_cal(p = p_summ, outdir = "../figures/", id = "2224_summ", width = 6)
+
+year_summary %>%
+  mutate(ratio = total_density_f1 / total_density_cal) %>%
+  ggplot(aes(x = factor(year), y = ratio)) +
+  geom_col(fill = "#D95F02") +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  labs(
+    x = "Year",
+    y = "F1 / GAM ratio",
+    title = "Relative difference between thresholded and calibrated estimates"
+  ) +
+  theme_minimal()
+########################################################################
+
 p_totalcal = ggplot(img_level_final, aes(x = raw_detection_number, y = predicted_number)) +
   geom_point(alpha = 0.3, size = 2) +
   geom_smooth(method = "lm", color = "red", se = FALSE) +
