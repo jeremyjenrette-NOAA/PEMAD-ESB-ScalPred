@@ -1,0 +1,57 @@
+# =============================================================================
+# Title: Default Detector Template
+#
+# Description: Runs object detection pipeline on input imagery from memory
+# =============================================================================
+
+process detector_input
+  :: image_filter
+  :filter:type vxl_convert_image
+
+  block filter:vxl_convert_image
+    :format byte
+    :force_three_channel true
+  endblock
+
+# =============================================================================
+
+process detector1
+  :: image_object_detector
+  :detector:type netharn
+
+  block detector:netharn
+    relativepath deployed = trained_detector.zip
+    :thresh 0.01
+	# Detector parameters
+    :gpu_index                                 0
+    :batch_size                                auto
+    :area_pivot                                0
+    :border_exclude                            0
+    :chip_method                               native_square
+    :chip_width                                640
+    :chip_expansion                            1.4
+    :average_prior                             False
+    # Image scaling parameters
+    :resize_option                             adaptive
+    :scale                                     1.0
+  endblock
+
+connect from detector_input.image
+        to   detector1.image
+
+# =============================================================================
+
+process detector_output
+  :: refine_detections
+  :refiner:type nms
+
+  block refiner:nms
+    :max_overlap 0.65
+    :nms_scale_factor 1.0
+    :output_scale_factor 1.0
+  endblock
+
+connect from detector_input.image
+        to   detector_output.image
+connect from detector1.detected_object_set
+        to   detector_output.detected_object_set
