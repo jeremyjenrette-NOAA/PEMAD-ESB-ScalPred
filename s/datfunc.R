@@ -138,7 +138,7 @@ build_detection_tables <- function(
           image_id,
           latitude,
           longitude,
-          bottom_depth,
+          # bottom_depth,
           chlorophyll,
           cdom,
           altitude,
@@ -157,7 +157,8 @@ build_detection_tables <- function(
         ),
       by = "image_id"
     ) |>
-    drop_na(conf, y)
+    drop_na(conf, y) %>%
+    mutate(bottom_depth = altitude + v_depth)
   
   #-------------------------------#
   # 7) Return structured output

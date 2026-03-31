@@ -12,17 +12,17 @@ meta2224 <- read.csv("../data/processed/metadata2224.csv")
 #============================================================#
 # read data
 #============================================================#
-at <- read.csv("../data/raw/2224scallop_viame_260065/autotest2224_viame_cascade.csv") %>%
+at <- read.csv("../data/raw/2224scallop_yolo12n_261070/eval/autotest2224_yolo12n.csv") %>%
   mutate(truedetect = if_else(truedetect == "True", TRUE, FALSE)) %>%
   rename(spname = Spname) %>%
   rename(image_name = Imagename)
-mt <- read.csv("../data/raw/2224scallop_viame_260065/mantest2224_viame_cascade.csv") %>%
+mt <- read.csv("../data/raw/2224scallop_yolo12n_261070/eval/mantest2224_yolo12n.csv") %>%
   rename(spname = Spname) %>%
   rename(image_name = Imagename)
 
 out <- build_detection_tables(mt, at, meta2224)
 
-model_name <- "Cas2224"
+model_name <- "YOLOv122224"
 
 res <- structure_by_region(out, model_name, 
                            region_lat_cutoff = 40, 

@@ -4,8 +4,8 @@ source("./gamfunc.R")
 source("./fitfunc.R")
 source("./procfunc.R")
 
-load("../data/processed/Casfixed2022.RData")
-load("../data/processed/YOLOv112022.RData")
+load("../data/processed/Cas2224.RData")
+load("../data/processed/YOLOv122224.RData")
 
 model = Cas2224
 model_name = deparse(substitute(Cas2224))
