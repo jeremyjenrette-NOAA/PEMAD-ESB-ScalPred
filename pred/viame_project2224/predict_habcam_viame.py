@@ -53,6 +53,96 @@ auto_pipeline = "auto"
 # Global flag to see if any video has successfully completed processing
 any_video_complete = False
 
+from pathlib import Path
+from PIL import Image
+from datetime import datetime
+
+def read_image_list(list_path):
+    with open(list_path, "r") as f:
+        return [line.strip() for line in f if line.strip()]
+
+def read_completed(resume_file):
+    p = Path(resume_file)
+    if not p.exists():
+        return set()
+    with open(p, "r") as f:
+        return set(line.strip() for line in f if line.strip())
+
+def append_completed(resume_file, image_paths):
+    with open(resume_file, "a") as f:
+        for p in image_paths:
+            f.write(str(p) + "\n")
+
+def log_progress(progress_file, msg):
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(progress_file, "a") as f:
+        f.write(f"[{stamp}] {msg}\n")
+
+def chunk_list(items, chunk_size):
+    for i in range(0, len(items), chunk_size):
+        yield items[i:i + chunk_size]
+
+def split_image_to_half(src_path, dst_path, split="right"):
+    img = Image.open(src_path).convert("RGB")
+    w, h = img.size
+    if split == "left":
+        out = img.crop((0, 0, w // 2, h))
+    elif split == "right":
+        out = img.crop((w // 2, 0, w, h))
+    else:
+        out = img
+    dst_path.parent.mkdir(parents=True, exist_ok=True)
+    out.save(dst_path)
+
+def append_chunk_csv(master_csv, chunk_csv):
+    master_csv = Path(master_csv)
+    chunk_csv = Path(chunk_csv)
+
+    if not chunk_csv.exists():
+        raise FileNotFoundError(f"Missing chunk CSV: {chunk_csv}")
+
+    with open(chunk_csv, "r") as fin:
+        lines = fin.readlines()
+
+    if not master_csv.exists():
+        with open(master_csv, "w") as fout:
+            fout.writelines(lines)
+    else:
+        with open(master_csv, "a") as fout:
+            for line in lines:
+                if line.startswith("#"):
+                    continue
+                fout.write(line)
+
+def prepare_chunk_images(image_paths, split_mode, temp_dir):
+    """
+    Returns:
+        chunk_input_paths: paths to feed VIAME
+        mapping: dict of VIAME input image -> original image path
+    """
+    if split_mode == "none":
+        return image_paths, {str(p): str(p) for p in image_paths}
+
+    temp_dir = Path(temp_dir)
+    mapping = {}
+    chunk_input_paths = []
+
+    for p in image_paths:
+        src = Path(p)
+        dst = temp_dir / src.name
+        split_image_to_half(src, dst, split=split_mode)
+        chunk_input_paths.append(str(dst))
+        mapping[str(dst)] = str(src)
+
+    return chunk_input_paths, mapping
+
+def write_input_list(paths, out_file):
+    out_file = Path(out_file)
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_file, "w") as f:
+        for p in paths:
+            f.write(str(p) + "\n")
+
 def list_elems_in_dir( folder ):
   if not os.path.exists( folder ) and os.path.exists( folder + ".lnk" ):
     folder = folder + ".lnk"
@@ -884,12 +974,116 @@ def process_using_kwiver( input_path, options, is_image_list=False,
     elif len( log_base ) > 0:
       log_info( lb1 + 'Check ' + log_base + '.txt for error messages' + lb2 )
     
+def run_chunked_image_list(args, call_pipeline=True):
+    all_images = read_image_list(args.input_list)
+    completed = read_completed(args.resume_file)
+    remaining = [p for p in all_images if p not in completed]
+
+    create_dir(args.output_directory, logging=False, recreate=False, prompt=False)
+
+    if len(args.log_directory) > 0:
+        create_dir(os.path.join(args.output_directory, args.log_directory),
+                   logging=False, recreate=False, prompt=False)
+
+    log_progress(args.progress_file, f"Total images in master list: {len(all_images)}")
+    log_progress(args.progress_file, f"Already completed: {len(completed)}")
+    log_progress(args.progress_file, f"Remaining: {len(remaining)}")
+
+    if len(remaining) == 0:
+        log_info(lb1 + "Nothing left to process." + lb2)
+        return
+
+    for chunk_idx, orig_chunk in enumerate(chunk_list(remaining, args.chunk_size), start=1):
+        chunk_tag = f"chunk_{chunk_idx:05d}"
+        chunk_dir = os.path.join(args.output_directory, chunk_tag)
+        create_dir(chunk_dir, logging=False, recreate=False, prompt=False)
+
+        if len(args.log_directory) > 0 and args.log_directory != "PIPE":
+            chunk_log_dir = os.path.join(chunk_dir, args.log_directory)
+            create_dir(chunk_log_dir, logging=False, recreate=False, prompt=False)
+
+        temp_img_dir = os.path.join(chunk_dir, args.temp_image_dir)
+
+        chunk_input_paths, mapping = prepare_chunk_images(
+            orig_chunk,
+            args.split,
+            temp_img_dir
+        )
+
+        chunk_list_file = os.path.join(chunk_dir, f"{chunk_tag}.txt")
+        write_input_list(chunk_input_paths, chunk_list_file)
+
+        log_progress(args.progress_file,
+                     f"Starting {chunk_tag} with {len(orig_chunk)} original images")
+
+        # clone args for this chunk
+        chunk_args = argparse.Namespace(**vars(args))
+        chunk_args.input = ""
+        chunk_args.input_video = ""
+        chunk_args.input_dir = ""
+        chunk_args.input_list = chunk_list_file
+        chunk_args.output_directory = chunk_dir
+        chunk_args.no_reset_prompt = True
+
+        process_using_kwiver(
+            chunk_list_file,
+            chunk_args,
+            is_image_list=True,
+            base_name_override=chunk_tag,
+            cpu=0,
+            gpu=0,
+            run_pipeline=call_pipeline
+        )
+
+        expected_chunk_csv = os.path.join(chunk_dir, f"{chunk_tag}_detections.csv")
+
+        # fallback: process_using_kwiver may key off input basename
+        if not os.path.exists(expected_chunk_csv):
+            alt_csv = os.path.join(
+                chunk_dir,
+                os.path.splitext(os.path.basename(chunk_list_file))[0] + "_detections.csv"
+            )
+            if os.path.exists(alt_csv):
+                expected_chunk_csv = alt_csv
+
+        if not os.path.exists(expected_chunk_csv):
+            raise FileNotFoundError(f"Chunk detections were not created: {expected_chunk_csv}")
+
+        append_chunk_csv(args.master_csv, expected_chunk_csv)
+        append_completed(args.resume_file, orig_chunk)
+
+        done_n = len(read_completed(args.resume_file))
+        log_progress(args.progress_file,
+                     f"Finished {chunk_tag}. Total completed: {done_n} / {len(all_images)}")
+
+        if args.split != "none":
+            shutil.rmtree(temp_img_dir, ignore_errors=True)
 
 # Main Function
 if __name__ == "__main__" :
 
-  parser = argparse.ArgumentParser(description="Process new videos",
-     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+  parser = argparse.ArgumentParser(
+    description="Process new videos",
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter
+  )
+
+  parser.add_argument("--chunk-size", type=int, default=5000,
+    help="Number of images per processing chunk")
+
+  parser.add_argument("--resume-file", default="completed.txt",
+    help="File listing original image paths already processed")
+
+  parser.add_argument("--progress-file", default="progress.log",
+    help="Progress log file")
+
+  parser.add_argument("--master-csv", default="all_detections.csv",
+    help="Master detection CSV to append successful chunk outputs into")
+
+  parser.add_argument("--split", choices=["none", "left", "right"], default="none",
+    help="Optionally split each image before prediction")
+
+  parser.add_argument("--temp-image-dir", default="_tmp_split_images",
+    help="Temporary directory for split images")
 
   parser.add_argument( "-i", dest="input", default="",
     help="Input folder, video, or input list (autodetect)" )
@@ -1107,10 +1301,13 @@ if __name__ == "__main__" :
   if process_data:
 
     # Handle output directory creation if necessary
-    if len( args.output_directory ) > 0:
-      recreate_dir = ( not args.init_db and not args.no_reset_prompt and call_pipeline )
-      prompt_user = ( not args.no_reset_prompt and call_pipeline )
-      create_dir( args.output_directory, logging=False, recreate=recreate_dir, prompt=prompt_user )
+    if len(args.output_directory) > 0:
+      if len(args.input_list) > 0 and args.chunk_size > 0:
+        create_dir(args.output_directory, logging=False, recreate=False, prompt=False)
+      else:
+        recreate_dir = (not args.init_db and not args.no_reset_prompt and call_pipeline)
+        prompt_user = (not args.no_reset_prompt and call_pipeline)
+        create_dir(args.output_directory, logging=False, recreate=recreate_dir, prompt=prompt_user)
 
     if len( args.log_directory ) > 0:
       create_dir( args.output_directory + div + args.log_directory, logging=False )
@@ -1129,6 +1326,33 @@ if __name__ == "__main__" :
           args.input_list = args.input
       else:
         args.input_dir = args.input
+
+    # Check for local pipelines and pre-reqs present
+    if "_project_folder.pipe" in args.pipeline:
+      if not os.path.exists( "category_models/detector.pipe" ):
+        if has_file_with_extension( "category_models", "svm" ):
+          if args.pipeline.endswith( "detector_project_folder.pipe" ):
+            args.pipeline = os.path.join( "pipelines", "detector_svm_models.pipe" )
+          elif args.pipeline.endswith( "frame_classifier_project_folder.pipe" ):
+            args.pipeline = os.path.join( "pipelines", "frame_classifier_svm.pipe" )
+          elif args.pipeline.endswith( "tracker_project_folder.pipe" ):
+            args.pipeline = os.path.join( "pipelines", "tracker_svm_models.pipe" )
+          else:
+            exit_with_error( "Use of this script requires training a detector first" )
+        else:
+          exit_with_error( "Use of this script requires training a detector first" )
+
+    # Chunked resume workflow for image lists
+    if len(args.input_list) > 0 and args.chunk_size > 0:
+      if len(args.output_directory) > 0:
+        create_dir(args.output_directory, logging=False, recreate=False, prompt=False)
+
+      if len(args.log_directory) > 0:
+        create_dir(args.output_directory + div + args.log_directory,
+                   logging=False, recreate=False, prompt=False)
+
+      run_chunked_image_list(args, call_pipeline=call_pipeline)
+      sys.exit(0)
 
     if len( args.input_list ) > 0:
       if args.gpu_count > 1:
@@ -1154,21 +1378,6 @@ if __name__ == "__main__" :
       log_info( "Processing " + str( len( data_list ) ) + video_str + lb2 )
     elif not args.build_index:
       log_info( lb1 )
-
-    # Check for local pipelines and pre-reqs present
-    if "_project_folder.pipe" in args.pipeline:
-      if not os.path.exists( "category_models/detector.pipe" ):
-        if has_file_with_extension( "category_models", "svm" ):
-          if args.pipeline.endswith( "detector_project_folder.pipe" ):
-            args.pipeline = os.path.join( "pipelines", "detector_svm_models.pipe" )
-          elif args.pipeline.endswith( "frame_classifier_project_folder.pipe" ):
-            args.pipeline = os.path.join( "pipelines", "frame_classifier_svm.pipe" )
-          elif args.pipeline.endswith( "tracker_project_folder.pipe" ):
-            args.pipeline = os.path.join( "pipelines", "tracker_svm_models.pipe" )
-          else:
-            exit_with_error( "Use of this script requires training a detector first" )
-        else:
-          exit_with_error( "Use of this script requires training a detector first" )
 
     # Process videos in parallel, one per GPU
     data_queue = queue.Queue()

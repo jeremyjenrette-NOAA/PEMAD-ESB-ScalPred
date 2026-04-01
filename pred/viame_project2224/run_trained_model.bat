@@ -4,8 +4,8 @@ REM Path to VIAME installation
 SET VIAME_INSTALL=.\..\..\..\
 
 REM Processing options
-SET INPUT_LIST=input_list.txt
-SET OUTPUT_DIRECTORY=output
+SET INPUT_LIST=input_list_2024.txt
+SET OUTPUT_DIRECTORY=D:\output_2024
 SET INPUT_FRAME_RATE=1
 SET PROCESS_FRAME_RATE=1
 
@@ -24,9 +24,14 @@ CALL "setup_viame.bat"
 REM Set current directory for project folder pipe
 SET VIAME_PROJECT_DIR=%~dp0
 
-python.exe "process_video.py" ^
+python.exe "predict_habcam_viame.py" ^
   -l "%INPUT_LIST%" -ifrate %INPUT_FRAME_RATE% -frate %PROCESS_FRAME_RATE% ^
   -p pipelines\detector_project_folder.pipe -o %OUTPUT_DIRECTORY% --no-reset-prompt ^
-  -gpus %TOTAL_GPU_COUNT% -pipes-per-gpu %PIPES_PER_GPU%
+  -gpus %TOTAL_GPU_COUNT% -pipes-per-gpu %PIPES_PER_GPU% ^
+  --chunk-size 5000 ^
+  --resume-file "%OUTPUT_DIRECTORY%\completed.txt" ^
+  --progress-file "%OUTPUT_DIRECTORY%\progress.log" ^
+  --master-csv "%OUTPUT_DIRECTORY%\all_detections.csv" ^
+  --split right
 
 pause
