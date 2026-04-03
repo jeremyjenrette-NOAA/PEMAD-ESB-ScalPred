@@ -404,6 +404,12 @@ p_pdist = ggplot(pred_calibrated, aes(x = p_detection)) +
   )
 save_cal(p = p_pdist, outdir = "../figures/", id = "2224_dpist", width = 7)
 
+year_counts <- pred_lengths %>%
+  group_by(year) %>%
+  summarise(
+    n = sum(p_detection, na.rm = TRUE)
+  )
+
 p_lengthdist <- ggplot(pred_lengths, aes(x = length_mm, weight = p_detection)) +
   geom_histogram(
     bins = 50,
@@ -412,6 +418,18 @@ p_lengthdist <- ggplot(pred_lengths, aes(x = length_mm, weight = p_detection)) +
     alpha = 0.9
   ) +
   facet_wrap(~ year) +
+  geom_text(
+    data = year_counts,
+    aes(
+      x = Inf,
+      y = Inf,
+      label = paste0("n = ", scales::comma(round(n)))
+    ),
+    hjust = 1.1,
+    vjust = 1.5,
+    inherit.aes = FALSE,
+    size = 4
+  ) +
   xlim(0, 150) +
   scale_y_continuous(
     labels = label_number(scale = 1e-3, suffix = "k", accuracy = 1)
@@ -421,7 +439,139 @@ p_lengthdist <- ggplot(pred_lengths, aes(x = length_mm, weight = p_detection)) +
     y = "Expected number of individuals",
     title = "Expected scallop size distribution by year"
   ) +
-  theme_minimal()
+  theme_minimal(base_size = 13)
 p_lengthdist
-save_cal(p = p_lengthdist, outdir = "../figures/", id = "2224_lengthdist", width = 7)
+save_cal(p = p_lengthdist, outdir = "../figures/", id = "2224_lengthdist", width = 11.5)
 
+#####
+# sample size = same length distribution ?
+# The minimum number of probabilistically weighted detections 
+# needed to preserve the biological signal of size structure
+
+# How much data do we actually need to recover the scallop size distribution?
+#####
+
+df_2024 <- pred_lengths %>%
+  filter(year == 2024) %>%
+  filter(!is.na(length_mm))
+
+# Calculate Q1, Q3, and IQR
+Q1 <- quantile(df_2024$length_mm, 0.1)
+Q3 <- quantile(df_2024$length_mm, 0.9)
+IQR <- Q3 - Q1
+df_2024 <- df_2024[(df_2024$length_mm >= (Q1 - 1.5 * IQR) & df_2024$length_mm <= (Q3 + 1.5 * IQR)),]
+range(df_2024$length_mm)
+
+# define once
+breaks <- seq(min(df_2024$length_mm), max(df_2024$length_mm), length.out = 51)
+
+# then compute true histogram using SAME breaks
+true_hist <- hist(
+  df_2024$length_mm,
+  breaks = breaks,
+  weights = df_2024$p_detection,
+  plot = FALSE
+)
+
+true_density <- true_hist$counts / sum(true_hist$counts)
+
+target_sums <- seq(100, 10000, by = 250)
+
+results <- map_dfr(target_sums, function(target_p) {
+  
+  sims <- replicate(50, {
+    
+    # shuffle rows randomly
+    samp <- df_2024 %>%
+      slice_sample(prop = 1)
+    
+    # cumulative sum of probabilities
+    samp <- samp %>%
+      mutate(cum_p = cumsum(p_detection))
+    
+    # keep rows until reaching target Σp
+    samp_sub <- samp %>%
+      filter(cum_p <= target_p)
+    
+    # edge case: ensure at least one row beyond threshold
+    if (nrow(samp_sub) == 0) samp_sub <- samp[1, ]
+    
+    h <- hist(
+      samp_sub$length_mm,
+      breaks = breaks,
+      weights = samp_sub$p_detection,
+      plot = FALSE
+    )
+    
+    samp_density <- h$counts / sum(h$counts)
+    
+    sum(abs(samp_density - true_density))
+  })
+  
+  tibble(
+    target_p = target_p,
+    mean_error = mean(sims),
+    sd_error = sd(sims)
+  )
+})
+
+threshold <- 0.035  # 2.5% error
+
+p_min <- results %>%
+  filter(mean_error < threshold) %>%
+  slice(1) %>%
+  pull(target_p)
+
+expected_total <- sum(df_2024$p_detection, na.rm = TRUE)
+
+p_lengthss = ggplot(results, aes(x = target_p, y = mean_error)) +
+  geom_line(color = "black", linewidth = 1) +
+  geom_ribbon(
+    aes(ymin = mean_error - sd_error,
+        ymax = mean_error + sd_error),
+    alpha = 0.2,
+    fill = "grey50"
+  ) +
+  
+  # threshold
+  geom_hline(yintercept = threshold, linetype = "dashed", color = "red") +
+  
+  # minimum Σp
+  geom_vline(xintercept = p_min, linetype = "dashed", color = "blue") +
+  
+  # annotate minimum sample size
+  annotate(
+    "text",
+    x = p_min,
+    y = threshold,
+    label = paste0("Minimum Σp ≈ ", scales::comma(round(p_min)), 
+                   "\n  ",threshold*100,"% error"),
+    vjust = -1,
+    hjust = -0.1,
+    size = 4
+  ) +
+  
+  # annotate total available signal
+  # annotate(
+  #   "text",
+  #   x = max(results$target_p) * 0.65,
+  #   y = max(results$mean_error),
+  #   label = paste0(
+  #     "Available signal (2024):\n",
+  #     "Σp = ", scales::comma(round(expected_total)), "\n",
+  #     # "Filtered rows = ", scales::comma(n_filtered), "\n",
+  #     "(", round(prop_kept * 100, 1), "% retained)"
+  #   ),
+  #   hjust = 0.75,
+  #   size = 4
+  # ) +
+  
+  labs(
+    x = expression("Sample size (expected abundance, " * Sigma * "p[detection])"),
+    y = "Distribution error",
+    title = "Convergence of scallop length distribution (2024)"
+  ) +
+  theme_minimal(base_size = 14)
+p_lengthss
+save_cal(p = p_lengthss, id = "2224_lengthss", width = 10, height = 6, 
+         outdir = "../figures/", format = "png")
