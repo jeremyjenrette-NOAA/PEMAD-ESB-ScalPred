@@ -54,7 +54,8 @@ auto_pipeline = "auto"
 any_video_complete = False
 
 from pathlib import Path
-from PIL import Image
+from PIL import Image, UnidentifiedImageError, ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 from datetime import datetime
 
 def read_image_list(list_path):
@@ -83,16 +84,33 @@ def chunk_list(items, chunk_size):
         yield items[i:i + chunk_size]
 
 def split_image_to_half(src_path, dst_path, split="right"):
-    img = Image.open(src_path).convert("RGB")
-    w, h = img.size
-    if split == "left":
-        out = img.crop((0, 0, w // 2, h))
-    elif split == "right":
-        out = img.crop((w // 2, 0, w, h))
-    else:
-        out = img
-    dst_path.parent.mkdir(parents=True, exist_ok=True)
-    out.save(dst_path)
+    src_path = Path(src_path)
+    dst_path = Path(dst_path)
+
+    try:
+        # First pass: verify file is a real readable image
+        with Image.open(src_path) as img:
+            img.verify()
+
+        # Second pass: reopen after verify() and actually process
+        with Image.open(src_path) as img:
+            img = img.convert("RGB")
+            w, h = img.size
+
+            if split == "left":
+                out = img.crop((0, 0, w // 2, h))
+            elif split == "right":
+                out = img.crop((w // 2, 0, w, h))
+            else:
+                out = img
+
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            out.save(dst_path)
+
+        return True
+
+    except (UnidentifiedImageError, OSError, ValueError) as e:
+        return False, f"{src_path} :: {type(e).__name__}: {e}"
 
 def append_chunk_csv(master_csv, chunk_csv):
     master_csv = Path(master_csv)
@@ -114,27 +132,48 @@ def append_chunk_csv(master_csv, chunk_csv):
                     continue
                 fout.write(line)
 
-def prepare_chunk_images(image_paths, split_mode, temp_dir):
+def prepare_chunk_images(image_paths, split_mode, temp_dir, progress_file=None):
     """
     Returns:
         chunk_input_paths: paths to feed VIAME
         mapping: dict of VIAME input image -> original image path
+        skipped: list of skipped image paths
     """
     if split_mode == "none":
-        return image_paths, {str(p): str(p) for p in image_paths}
+        valid_paths = []
+        skipped = []
+
+        for p in image_paths:
+            try:
+                with Image.open(p) as img:
+                    img.verify()
+                valid_paths.append(str(p))
+            except (UnidentifiedImageError, OSError, ValueError) as e:
+                skipped.append(str(p))
+                if progress_file:
+                    log_progress(progress_file, f"Skipping unreadable image: {p} :: {type(e).__name__}: {e}")
+
+        return valid_paths, {str(p): str(p) for p in valid_paths}, skipped
 
     temp_dir = Path(temp_dir)
     mapping = {}
     chunk_input_paths = []
+    skipped = []
 
     for p in image_paths:
         src = Path(p)
         dst = temp_dir / src.name
-        split_image_to_half(src, dst, split=split_mode)
-        chunk_input_paths.append(str(dst))
-        mapping[str(dst)] = str(src)
+        result = split_image_to_half(src, dst, split=split_mode)
 
-    return chunk_input_paths, mapping
+        if result is True:
+            chunk_input_paths.append(str(dst))
+            mapping[str(dst)] = str(src)
+        else:
+            skipped.append(str(src))
+            if progress_file:
+                log_progress(progress_file, f"Skipping unreadable image: {result[1]}")
+
+    return chunk_input_paths, mapping, skipped
 
 def write_input_list(paths, out_file):
     out_file = Path(out_file)
@@ -1004,11 +1043,22 @@ def run_chunked_image_list(args, call_pipeline=True):
 
         temp_img_dir = os.path.join(chunk_dir, args.temp_image_dir)
 
-        chunk_input_paths, mapping = prepare_chunk_images(
+        chunk_input_paths, mapping, skipped = prepare_chunk_images(
             orig_chunk,
             args.split,
-            temp_img_dir
+            temp_img_dir,
+            progress_file=args.progress_file
         )
+
+        if len(skipped) > 0:
+            log_progress(args.progress_file,
+                         f"{chunk_tag}: skipped {len(skipped)} unreadable images")
+
+        if len(chunk_input_paths) == 0:
+            log_progress(args.progress_file,
+                         f"{chunk_tag}: no valid images remained after screening")
+            append_completed(args.resume_file, skipped)
+            continue
 
         chunk_list_file = os.path.join(chunk_dir, f"{chunk_tag}.txt")
         write_input_list(chunk_input_paths, chunk_list_file)

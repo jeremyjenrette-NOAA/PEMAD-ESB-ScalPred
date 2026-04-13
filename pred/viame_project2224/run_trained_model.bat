@@ -4,8 +4,9 @@ REM Path to VIAME installation
 SET VIAME_INSTALL=.\..\..\..\
 
 REM Processing options
-SET INPUT_LIST=input_list_2024.txt
-SET OUTPUT_DIRECTORY=D:\output_2024
+SET YEAR=2022
+SET INPUT_LIST=input_list_%YEAR%.txt
+SET OUTPUT_DIRECTORY=D:\output_%YEAR%
 SET INPUT_FRAME_RATE=1
 SET PROCESS_FRAME_RATE=1
 
@@ -29,9 +30,9 @@ python.exe "predict_habcam_viame.py" ^
   -p pipelines\detector_project_folder.pipe -o %OUTPUT_DIRECTORY% --no-reset-prompt ^
   -gpus %TOTAL_GPU_COUNT% -pipes-per-gpu %PIPES_PER_GPU% ^
   --chunk-size 5000 ^
-  --resume-file "%OUTPUT_DIRECTORY%\completed.txt" ^
+  --resume-file "%OUTPUT_DIRECTORY%\completed_%YEAR%.txt" ^
   --progress-file "%OUTPUT_DIRECTORY%\progress.log" ^
-  --master-csv "%OUTPUT_DIRECTORY%\all_detections.csv" ^
+  --master-csv "%OUTPUT_DIRECTORY%\detections_%YEAR%.csv" ^
   --split right
 
 pause

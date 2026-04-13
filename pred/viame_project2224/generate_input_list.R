@@ -53,7 +53,7 @@ write_viame_input_list <- function(year,
 
 # Write 2024 input list
 write_viame_input_list(
-  year = 2024,
+  year = 2022,
   img_inventory_df = img_inventory,
   out_dir = "../viame_project2224"
 )
