@@ -229,18 +229,66 @@ p_totalcal = ggplot(img_level_final, aes(x = raw_detection_number, y = predicted
   theme_minimal()
 save_cal(p = p_totalcal, outdir = "../figures/", id = "2224_totalcal", width = 6)
 
-# lims <- quantile(
-#   c(img_level_final$raw_detection_number,
-#     img_level_final$predicted_number),
-#   probs = c(0.05, 0.975),
-#   na.rm = TRUE
-# )
-# 
-# p_totalcal +
-#   coord_cartesian(
-#     xlim = lims,
-#     ylim = lims
-#   )
+# 1. Create depth bins and counts
+depth_bins <- img_level_final %>%
+  filter(!is.na(bottom_depth), !is.na(density_cal)) %>%
+  mutate(depth_bin = cut(bottom_depth, breaks = 19)) %>%
+  group_by(depth_bin) %>%
+  summarise(
+    depth_mid = mean(bottom_depth, na.rm = TRUE),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(depth_mid)
+
+# 2. Rescale counts onto the density axis
+max_density <- max(img_level_final$density_cal, na.rm = TRUE)
+max_n <- max(depth_bins$n, na.rm = TRUE)
+
+scale_factor <- max_density / max_n
+
+depth_bins <- depth_bins %>%
+  mutate(n_scaled = n * scale_factor)
+
+# 3. Plot
+p_densedepth <- ggplot() +
+  geom_col(
+    data = depth_bins,
+    aes(x = depth_mid, y = n_scaled),
+    width = diff(range(img_level_final$bottom_depth, na.rm = TRUE)) / 20 * 0.9,
+    fill = "grey80",
+    color = "#635758",
+    alpha = 1
+  ) +
+  geom_point(
+    data = img_level_final,
+    aes(x = bottom_depth, y = density_cal),
+    alpha = 0.25,
+    size = 1.6,
+    color = "#1F4E79"
+  ) +
+  scale_y_continuous(
+    name = expression("Density (n / m"^2 * ")"),
+    sec.axis = sec_axis(
+      ~ . / scale_factor,
+      name = "Number of images",
+      labels = label_number(scale = 1e-3, suffix = "k", accuracy = 1)
+    )
+  ) +
+  labs(
+    x = "Bottom depth (m)",
+    title = "Predicted scallop density at depth"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.title.y.left = element_text(color = "#1F4E79"),
+    axis.title.y.right = element_text(color = "#635758"),
+    panel.grid.minor = element_blank()
+  )
+
+p_densedepth
+save_cal(p = p_densedepth, outdir = "../figures/", id = "2224_densedepth", width = 7)
 
 world <- map_data("world")
 
@@ -268,7 +316,7 @@ p_mapcal <- ggplot() +
   scale_color_viridis_c(
     option = "viridis",
     trans = "log10",
-    limits = quantile(df$density_cal_plot, c(0, 1), na.rm = TRUE),
+    # limits = quantile(df$density_cal_plot, c(0, 1), na.rm = TRUE),
     oob = scales::squish,
     breaks = scales::log_breaks(n = 5),
     labels = scales::label_number_auto()
@@ -277,26 +325,13 @@ p_mapcal <- ggplot() +
     xlim = range(df$longitude, na.rm = TRUE),
     ylim = range(df$latitude, na.rm = TRUE)
   ) +
-  facet_wrap(~ year) +
+  facet_wrap(~ year, ncol = 1) +
   labs(
-    title = "Predicted scallop density by year",
-    color = "Density (n/m²)"
+    title = "Predicted scallop density",
+    color = "Density (n / m²)"
   ) +
   theme_minimal()
-save_cal(p = p_mapcal, outdir = "../figures/", id = "2224_mapcal", 
-         width = 7.5, height = 5.5)
-
-p_densedepth = ggplot(img_level_final, aes(x = bottom_depth, y = density_cal)) +
-  geom_point(alpha = 0.2) +
-  # geom_smooth(method = "gam", formula = y ~ s(x), color = "blue") +
-  # xlim(92, 115) +
-  labs(
-    x = "Bottom depth",
-    y = "Density (n/m²)",
-    title = "Density at depth"
-  ) +
-  theme_minimal()
-save_cal(p = p_densedepth, outdir = "../figures/", id = "2224_densedepth", width = 6)
+save_cal(p = p_mapcal, outdir = "../figures/", id = "2224_mapcal", width = 7)
 
 # should facet this by region
 p_caldepth = plot_calibration_by_depth_envelopes(
@@ -369,44 +404,11 @@ p_pdist = ggplot(pred_calibrated, aes(x = p_detection)) +
   )
 save_cal(p = p_pdist, outdir = "../figures/", id = "2224_dpist", width = 7)
 
-# facet below plot by region
-x_pos <- max(img_level_final$bottom_depth, na.rm = TRUE)
-
-y_raw <- mean(img_level_final$density_raw, na.rm = TRUE)
-y_cal <- mean(img_level_final$density_cal, na.rm = TRUE)
-
-p_rawcaldepth = ggplot(img_level_final, aes(x = bottom_depth)) +
-  geom_smooth(aes(y = density_raw), color = "red", se = FALSE, linewidth = 1.2) +
-  geom_smooth(aes(y = density_cal), color = "blue", se = FALSE, linewidth = 1.2) +
-  
-  annotate("text",
-           x = x_pos,
-           y = y_raw,
-           label = "Detection density",
-           color = "red",
-           hjust = 1.1,
-           size = 4.5) +
-  
-  annotate("text",
-           x = x_pos,
-           y = y_cal,
-           label = "Calibrated density",
-           color = "blue",
-           hjust = 1.1,
-           size = 4.5) +
-  
-  labs(
-    x = "Bottom depth (m)",
-    y = expression("Density (n / m"^2 * ")"),
-    title = "Depth-dependent bias correction"
-  ) +
-  
-  theme_minimal(base_size = 14) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    panel.grid.minor = element_blank()
+year_counts <- pred_lengths %>%
+  group_by(year) %>%
+  summarise(
+    n = sum(p_detection, na.rm = TRUE)
   )
-save_cal(p = p_rawcaldepth, outdir = "../figures/", id = "2224_rawcaldepth", width = 7)
 
 p_lengthdist <- ggplot(pred_lengths, aes(x = length_mm, weight = p_detection)) +
   geom_histogram(
@@ -416,6 +418,18 @@ p_lengthdist <- ggplot(pred_lengths, aes(x = length_mm, weight = p_detection)) +
     alpha = 0.9
   ) +
   facet_wrap(~ year) +
+  geom_text(
+    data = year_counts,
+    aes(
+      x = Inf,
+      y = Inf,
+      label = paste0("n = ", scales::comma(round(n)))
+    ),
+    hjust = 1.1,
+    vjust = 1.5,
+    inherit.aes = FALSE,
+    size = 4
+  ) +
   xlim(0, 150) +
   scale_y_continuous(
     labels = label_number(scale = 1e-3, suffix = "k", accuracy = 1)
@@ -425,7 +439,139 @@ p_lengthdist <- ggplot(pred_lengths, aes(x = length_mm, weight = p_detection)) +
     y = "Expected number of individuals",
     title = "Expected scallop size distribution by year"
   ) +
-  theme_minimal()
+  theme_minimal(base_size = 13)
 p_lengthdist
-save_cal(p = p_lengthdist, outdir = "../figures/", id = "2224_lengthdist", width = 7)
+save_cal(p = p_lengthdist, outdir = "../figures/", id = "2224_lengthdist", width = 11.5)
 
+#####
+# sample size = same length distribution ?
+# The minimum number of probabilistically weighted detections 
+# needed to preserve the biological signal of size structure
+
+# How much data do we actually need to recover the scallop size distribution?
+#####
+
+df_2024 <- pred_lengths %>%
+  filter(year == 2024) %>%
+  filter(!is.na(length_mm))
+
+# Calculate Q1, Q3, and IQR
+Q1 <- quantile(df_2024$length_mm, 0.1)
+Q3 <- quantile(df_2024$length_mm, 0.9)
+IQR <- Q3 - Q1
+df_2024 <- df_2024[(df_2024$length_mm >= (Q1 - 1.5 * IQR) & df_2024$length_mm <= (Q3 + 1.5 * IQR)),]
+range(df_2024$length_mm)
+
+# define once
+breaks <- seq(min(df_2024$length_mm), max(df_2024$length_mm), length.out = 51)
+
+# then compute true histogram using SAME breaks
+true_hist <- hist(
+  df_2024$length_mm,
+  breaks = breaks,
+  weights = df_2024$p_detection,
+  plot = FALSE
+)
+
+true_density <- true_hist$counts / sum(true_hist$counts)
+
+target_sums <- seq(100, 10000, by = 250)
+
+results <- map_dfr(target_sums, function(target_p) {
+  
+  sims <- replicate(50, {
+    
+    # shuffle rows randomly
+    samp <- df_2024 %>%
+      slice_sample(prop = 1)
+    
+    # cumulative sum of probabilities
+    samp <- samp %>%
+      mutate(cum_p = cumsum(p_detection))
+    
+    # keep rows until reaching target Σp
+    samp_sub <- samp %>%
+      filter(cum_p <= target_p)
+    
+    # edge case: ensure at least one row beyond threshold
+    if (nrow(samp_sub) == 0) samp_sub <- samp[1, ]
+    
+    h <- hist(
+      samp_sub$length_mm,
+      breaks = breaks,
+      weights = samp_sub$p_detection,
+      plot = FALSE
+    )
+    
+    samp_density <- h$counts / sum(h$counts)
+    
+    sum(abs(samp_density - true_density))
+  })
+  
+  tibble(
+    target_p = target_p,
+    mean_error = mean(sims),
+    sd_error = sd(sims)
+  )
+})
+
+threshold <- 0.035  # 2.5% error
+
+p_min <- results %>%
+  filter(mean_error < threshold) %>%
+  slice(1) %>%
+  pull(target_p)
+
+expected_total <- sum(df_2024$p_detection, na.rm = TRUE)
+
+p_lengthss = ggplot(results, aes(x = target_p, y = mean_error)) +
+  geom_line(color = "black", linewidth = 1) +
+  geom_ribbon(
+    aes(ymin = mean_error - sd_error,
+        ymax = mean_error + sd_error),
+    alpha = 0.2,
+    fill = "grey50"
+  ) +
+  
+  # threshold
+  geom_hline(yintercept = threshold, linetype = "dashed", color = "red") +
+  
+  # minimum Σp
+  geom_vline(xintercept = p_min, linetype = "dashed", color = "blue") +
+  
+  # annotate minimum sample size
+  annotate(
+    "text",
+    x = p_min,
+    y = threshold,
+    label = paste0("Minimum Σp ≈ ", scales::comma(round(p_min)), 
+                   "\n  ",threshold*100,"% error"),
+    vjust = -1,
+    hjust = -0.1,
+    size = 4
+  ) +
+  
+  # annotate total available signal
+  # annotate(
+  #   "text",
+  #   x = max(results$target_p) * 0.65,
+  #   y = max(results$mean_error),
+  #   label = paste0(
+  #     "Available signal (2024):\n",
+  #     "Σp = ", scales::comma(round(expected_total)), "\n",
+  #     # "Filtered rows = ", scales::comma(n_filtered), "\n",
+  #     "(", round(prop_kept * 100, 1), "% retained)"
+  #   ),
+  #   hjust = 0.75,
+  #   size = 4
+  # ) +
+  
+  labs(
+    x = expression("Sample size (expected abundance, " * Sigma * "p[detection])"),
+    y = "Distribution error",
+    title = "Convergence of scallop length distribution (2024)"
+  ) +
+  theme_minimal(base_size = 14)
+p_lengthss
+save_cal(p = p_lengthss, id = "2224_lengthss", width = 10, height = 6, 
+         outdir = "../figures/", format = "png")

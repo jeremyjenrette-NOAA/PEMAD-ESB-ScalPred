@@ -9,20 +9,57 @@ source("./datfunc.R")
 # meta22 = rbind(metagb, metamab, missing)
 # meta22 <- meta22[!duplicated(meta22$IMAGENAME), ]
 meta2224 <- read.csv("../data/processed/metadata2224.csv")
+metastar = read.csv("../data/processed/startestmeta.csv") %>%
+  rename(
+    Imagename              = IMAGE_NAME,
+    altitude               = ALTIMETER_ALTITUDE_METER,
+    altitude2              = ALTIMETER_ALTITUDE2_METER,
+    stereo_altitude        = STEREO_ALTITUDE_METER,
+    backscatter            = FLUOROMETER_BACKSCATTER_NTU,
+    bottom_depth           = FATHOMETER_OCEAN_DEPTH_METER,
+    cdom                   = FLUOROMETER_CDOM,
+    chlorophyll            = FLUOROMETER_CHLOROPHYLL,
+    field_of_view_sq_meter = FIELD_OF_VIEW_SQ_METER,
+    field_of_view_source   = FIELD_OF_VIEW_SOURCE,
+    heading                = VEHICLE_MAGNETIC_HEADING,
+    latitude               = SHIP_LATITUDE,
+    longitude              = SHIP_LONGITUDE,
+    millimeter_per_pixel   = MILLIMETER_PER_PIXEL,
+    o2                     = CTD2_DISSOLVED_OXYGEN,
+    pitch                  = VEHICLE_PITCH_ANGLE,
+    roll                   = VEHICLE_ROLL_ANGLE,
+    s                      = CTD_SALINITY,
+    t                      = CTD_TEMPERATURE_CELSIUS,
+    fluorometer_signal     = FLUOROMETER_SIGNAL,
+    datetime               = IMAGE_TIMESTAMP,
+    v_depth                = CTD_VEHICLE_DEPTH_METER,
+    gear                   = GEAR,
+    cruise_id              = CRUISE_ID,
+    habcam_pk              = HABCAM_PK
+  ) %>%
+  mutate(
+    bottom_depth = altitude + v_depth
+  ) %>%
+  mutate(
+    Imagename = basename(Imagename)
+  ) %>%
+  distinct(Imagename, .keep_all = TRUE)
 #============================================================#
 # read data
 #============================================================#
-at <- read.csv("../data/raw/2224scallop_yolo12n_261070/eval/autotest2224_yolo12n.csv") %>%
+at <- read.csv("../data/raw/2024star_viame_339506/autotest2024_viame_cascade.csv") %>%
   mutate(truedetect = if_else(truedetect == "True", TRUE, FALSE)) %>%
   rename(spname = Spname) %>%
   rename(image_name = Imagename)
-mt <- read.csv("../data/raw/2224scallop_yolo12n_261070/eval/mantest2224_yolo12n.csv") %>%
+mt <- read.csv("../data/raw/2024star_viame_339506/mantest2024_viame_cascade.csv") %>%
   rename(spname = Spname) %>%
   rename(image_name = Imagename)
 
-out <- build_detection_tables(mt, at, meta2224)
+out <- build_detection_tables(mt, at, metastar)
 
-model_name <- "YOLOv122224"
+out$calib_df$spname = "star"
+
+model_name <- "Casv2star"
 
 res <- structure_by_region(out, model_name, 
                            region_lat_cutoff = 40, 
