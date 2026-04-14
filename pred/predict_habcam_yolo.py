@@ -62,7 +62,7 @@ def ensure_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def load_inventory(inventory_path: Path, year: str | None = None) -> pd.DataFrame:
+def load_inventory(inventory_path: Path, year: str | None = None, process_col: str = "process_image") -> pd.DataFrame:
     """
     Load compiled inventory and retain only images flagged for processing.
     Supports .tsv, .csv, or .rds only if already converted upstream.
@@ -79,13 +79,13 @@ def load_inventory(inventory_path: Path, year: str | None = None) -> pd.DataFram
             "Use TSV or CSV exported from R."
         )
 
-    required = {"actual_path", "imagename", "process_image"}
+    required = {"actual_path", "imagename", process_col}
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"Inventory missing required columns: {sorted(missing)}")
 
     df = df.copy()
-    df["process_image"] = df["process_image"].astype(bool)
+    df[process_col] = df[process_col].astype(bool)
 
     df["actual_path_raw"] = df["actual_path"].astype(str)
     df["actual_path"] = df["actual_path_raw"].apply(normalize_windows_path)
@@ -96,7 +96,7 @@ def load_inventory(inventory_path: Path, year: str | None = None) -> pd.DataFram
         # fallback from path if year column absent
         df["year"] = df["actual_path"].astype(str).str.extract(r"/(20\d{2})/")[0]
 
-    df = df[df["process_image"]].copy()
+    df = df[df[process_col]].copy()
 
     if year is not None:
         df = df[df["year"] == str(year)].copy()
@@ -192,6 +192,11 @@ def main() -> None:
     parser.add_argument("--save", action="store_true", help="Save annotated prediction images")
     parser.add_argument("--save_every", type=int, default=100, help="Log progress every N images")
     parser.add_argument("--batch_size", type=int, default=16, help="Number of images per inference batch")
+    parser.add_argument(
+    "--process_col",
+    default="process_image",
+    help="Column name indicating which images to process"
+    )
     args = parser.parse_args()
 
     outdir = Path(args.outdir)
@@ -211,7 +216,11 @@ def main() -> None:
     file_log(f"CUDA available: {torch.cuda.is_available()}")
     file_log(f"Requested device: {args.device}")
 
-    inventory = load_inventory(Path(args.inventory), year=args.year)
+    inventory = load_inventory(
+    Path(args.inventory),
+    year=args.year,
+    process_col=args.process_col
+    )
     file_log(f"Inventory rows eligible for processing: {len(inventory)}")
 
     completed = load_completed(completed_txt)

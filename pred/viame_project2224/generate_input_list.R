@@ -2,11 +2,17 @@ library(dplyr)
 library(readr)
 
 # Load inventory
-img_inventory <- readRDS("../img_inventory_out/img_inventory_2022_2024_compiled.rds")
+# img_inventory <- readRDS("../img_inventory_out/img_inventory_2022_2024_compiled.rds")
+
+# make_flag <- function(n, step = 10, offset = 0) {
+#   ((seq_len(n) - 1 + offset) %% step == 0)
+# }
+# 
+# img_inventory$process_image15 <- make_flag(nrow(img_inventory), step = 10, offset = 5)
 
 # 1) subset to images flagged for processing
 img_inventory_proc <- img_inventory %>%
-  filter(process_image == TRUE)
+  filter(process_image15 == TRUE)
 
 # 2) convert Linux-style /z/... paths to Windows-style Z:\...
 to_windows_z_path <- function(x) {
@@ -53,7 +59,7 @@ write_viame_input_list <- function(year,
 
 # Write 2024 input list
 write_viame_input_list(
-  year = 2022,
+  year = 2024,
   img_inventory_df = img_inventory,
   out_dir = "../viame_project2224"
 )
