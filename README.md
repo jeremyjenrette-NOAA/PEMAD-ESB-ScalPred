@@ -154,15 +154,15 @@ The pipeline follows a structured, end-to-end workflow:
 
 * Image-level abundance computed as:
 
-[
-\hat{N}_{image} = \sum_i p_i
-]
+$$
+\hat{N}_{\text{image}} = \sum_i p_i
+$$
 
 * Density derived using field-of-view metadata:
 
-[
-\hat{D} = \frac{\sum_i p_i}{\text{area}_{image}}
-]
+$$
+\hat{D} = \frac{\sum_i p_i}{\text{area}_{\text{image}}}
+$$
 
 ---
 
