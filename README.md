@@ -18,6 +18,9 @@ The project integrates the latest object detection models (YOLO and Cascade R-CN
 This repository contains the code necessary to evaluate trained raw model outputs with image metadata. Here, we can train Generative Additive Models (GAMs), perform inference, predict calibrated abundance estimates, and predict length classes.  Included are figures and diagnostic plots. To see the **Detection Training** repository, visit...
 
 ### Project
+
+[How does it work?](figures/NEFSC-scal-flowchart.png)
+
 PEMAD-ESB-ScalPred provides:
 
 * Automating scallop detection across multi-year survey datasets (2022–2024)
@@ -107,29 +110,134 @@ PEMAD-ESB-ScalPred provides:
 
 The pipeline follows a structured, end-to-end workflow:
 
+---
+
 ### 1. Data Ingestion and Preparation
 
-* Raw HabCam imagery and metadata are compiled
-* Ground-truth annotations are harmonized (`groundtruth2224.csv`)
-* Image inventories and environmental covariates are standardized
+**Inputs**
+
+* `autotest` → automated detections
+* `mantest` → ground-truth annotations
+* metadata → environmental + image-level covariates
+
+**Scripts**
+
+* `makedat.R` → data loading and formatting
+* `datfunc.R` → processing functions + table construction
+
+**Process**
+
+1. Load `autotest`, `mantest`, and metadata using `makedat.R`
+2. Pass inputs to `build_detection_tables()`
+3. Perform spatial matching between detections and annotations
+4. Assign detection labels:
+
+   * True Positive (TP)
+   * False Positive (FP)
+
+* Stratify both tables by region (e.g., GB vs. MAB)
+
+**Outputs**
+
+* **Detection-level table**
+
+  * One row per detection
+  * Includes TP/FP classification
+
+* **Image-level table**
+
+  * One row per image
+  * `n_auto` → number of automated detections
+  * `n_manual` → number of ground-truth annotations
+
+* For subsequent steps, load saved model data with `load("../data/processed/YOLOv122224.RData")`
 
 ---
 
-### 2. Model Training and Evaluation
+### 2. Model Performance
+
+**Scripts**
+
+* `performance.R` → data loading and formatting
+* `procfunc.R` → processing functions + table construction
 
 * Object detection models trained using:
 
-  * **YOLO (Ultralytics)**
+  * **YOLO (Ultralytics)** - tested with v11, v12, v26
   * **Cascade R-CNN (VIAME framework)**
 * Model outputs include:
 
   * Bounding boxes
   * Confidence scores
-* Performance evaluated using held-out datasets (F1, precision-recall)
+  * IoU, match boolean via Hungarian Algorithm `truedetect`
+* Performance evaluated using held-out datasets (F1, precision-recall) `evaluate_pr_models()`
 
 ---
 
-### 3. Dataset-wide Inference
+### 3. Prediction Calibration
+
+* Detection-level predictions are calibrated using **Generalized Additive Models (GAMs)**
+* Calibration accounts for:
+
+  * Environmental conditions (e.g., depth, backscatter, turbidity)
+  * Detection uncertainty (confidence scores)
+* Produces **probabilistic detection estimates** (p(detection))
+
+**Scripts**
+
+* `gamcal.R` → data loading and metric visualization
+* `gamfunc.R` → prediction and plotting functions
+* `fitfunc.R` → detection-level GAMs by region
+    - image-level GAM deprecated, see `gammod.R` for latest
+
+**Model**
+
+$$
+\text{logit}\left(P(y_i = 1)\right) =
+f_1(\text{conf}_i, \text{bottom\_depth}_i) +
+f_2(\text{altitude}_i, \text{backscatter}_i) +
+f_3(\text{latitude}_i, \text{longitude}_i)
+$$
+
+**Outputs**
+
+* **Predictions & Diagnostic plots**
+
+  * Raw confidence --> P(Detection)
+  * True vs. predicted counts (stratified by region and includes F$_1$ score cutoff)
+  * Calibration by depth visual
+
+
+### 4. Dataset-wide Inference
+
+Folders 
+    - `pred/`
+    - `viame_project2224/`
+
+**Scripts**
+
+* `predict_habcam_yolo.py` → runs trained YOLO model on year-specified HabCam dataset
+Run:
+```
+nohup python predict_habcam_yolo.py \
+  --model ../models/2224scallop_yolo12n_261070/weights/best.pt \
+  --inventory img_inventory_out/img_inventory_2022_2024_compiled.tsv \
+  --outdir pred_out_2023_2 \
+  --year 2023 \
+  --model_name YOLOv12 \
+  --split right \
+  --process_col process_image15 \
+  --batch_size 16 \
+  --device 1 \
+  --conf 0.01 \
+  --nms_iou 0.65 \
+  --imgsize 1024 \
+  --max_detections 300 > predict_2023.log 2>&1 &
+```
+
+* `run_trained_model.bat` → runs trained VIAME-based Cascade R-CNN model year-specified HabCam dataset
+    - customize this script for model, year, `input_list.txt`
+    - designed for Windows-based processing
 
 * Trained models deployed across full survey datasets
 * Outputs stored as:
@@ -139,18 +247,12 @@ The pipeline follows a structured, end-to-end workflow:
 
 ---
 
-### 4. Prediction Calibration
-
-* Detection-level predictions are calibrated using **Generalized Additive Models (GAMs)**
-* Calibration accounts for:
-
-  * Environmental conditions (e.g., depth, backscatter, turbidity)
-  * Detection uncertainty (confidence scores)
-* Produces **probabilistic detection estimates** (p(detection))
-
----
 
 ### 5. Abundance Estimation
+
+**Scripts**
+
+* `calpred2.R` → load GAMs, predict, diagnostics, estimate abundance
 
 * Image-level abundance computed as:
 
@@ -158,7 +260,7 @@ $$
 \hat{N}_{\text{image}} = \sum_i p_i
 $$
 
-* Density derived using field-of-view metadata:
+* Density using field-of-view metadata:
 
 $$
 \hat{D} = \frac{\sum_i p_i}{\text{area}_{\text{image}}}
