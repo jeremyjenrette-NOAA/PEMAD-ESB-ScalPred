@@ -191,9 +191,9 @@ The pipeline follows a structured, end-to-end workflow:
     - image-level GAM deprecated, see `gammod.R` for latest
 
 **Model**
-
+* stratified by *region* and *detection model*
 $$
-\text{logit}(P(y_i = 1)) =
+\text{logit}[P(y_i = 1)] =
 f_1(\mathrm{conf}_i,\mathrm{bottomDepth}_i) +
 f_2(\mathrm{altitude}_i,\mathrm{backscatter}_i) +
 f_3(\mathrm{latitude}_i,\mathrm{longitude}_i)
