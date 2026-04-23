@@ -192,6 +192,8 @@ The pipeline follows a structured, end-to-end workflow:
 
 **Model**
 * stratified by *region* and *detection model*
+
+
 $$
 \text{logit}[P(y_i = 1)] =
 f_1(\mathrm{conf}_i,\mathrm{bottomDepth}_i) +
