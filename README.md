@@ -193,10 +193,10 @@ The pipeline follows a structured, end-to-end workflow:
 **Model**
 
 $$
-\text{logit}\left(P(y_i = 1)\right) =
-f_1(\text{conf}_i, \text{bottom\_depth}_i) +
-f_2(\text{altitude}_i, \text{backscatter}_i) +
-f_3(\text{latitude}_i, \text{longitude}_i)
+\operatorname{logit}\!\big(P(y_i = 1)\big) =
+f_1(\mathrm{conf}_i,\ \mathrm{bottomDepth}_i) +
+f_2(\mathrm{altitude}_i,\ \mathrm{backscatter}_i) +
+f_3(\mathrm{latitude}_i,\ \mathrm{longitude}_i)
 $$
 
 **Outputs**
@@ -204,15 +204,15 @@ $$
 * **Predictions & Diagnostic plots**
 
   * Raw confidence --> P(Detection)
-  * True vs. predicted counts (stratified by region and includes F$_1$ score cutoff)
+  * True vs. predicted counts (stratified by region and includes F_1 score cutoff)
   * Calibration by depth visual
 
 
 ### 4. Dataset-wide Inference
 
 Folders 
-    - `pred/`
-    - `viame_project2224/`
+* `pred/`
+* `viame_project2224/`
 
 **Scripts**
 
