@@ -19,7 +19,7 @@ This repository contains the code necessary to evaluate trained raw model output
 
 ### Project
 
-[How does it work?](figures/NEFSC-scal-flowchart.png)
+![How does it work?](figures/NEFSC-scal-flowchart.png)
 
 PEMAD-ESB-ScalPred provides:
 
