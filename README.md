@@ -272,6 +272,11 @@ $$
 
 ### 6. Length Estimation
 
+**Scripts**
+
+* `findlengths.R` → show stereo lengths, plot diagnostics, simulate sample effort
+* `lengthfunc.R` → functions to convert box to line and simulate sample size
+
 * Bounding boxes converted to scallop length using pixel-to-mm scaling
 * Produces:
 
@@ -282,7 +287,7 @@ $$
 
 ### 7. Visualization and Diagnostics
 
-* Model comparisons (YOLO vs VIAME)
+* Model comparisons (YOLO vs Cascade R-CNN)
 * Calibration diagnostics
 * Spatial and depth-based trends
 * Length-frequency distributions
