@@ -1,17 +1,13 @@
 #============================================================#
-load("../data/processed/YOLOv102022.RData")
-load("../data/processed/YOLOv122224.RData")
-load("../data/processed/YOLOv112224.RData")
-
-load("../data/processed/Cas2224.RData")
-load("../data/processed/YOLOv122224.RData")
+load("../data/processed/Casv2strat2224.RData")
+load("../data/processed/YOLOv12strat2224.RData")
 #============================================================#
 # Analysis: Precision-Recall
 #============================================================#
 library(tidyverse)
 source("./procfunc.R")
-out_pr <- evaluate_pr_models(list(YOLOv122224, Cas2224), 
-                             stratify_region = FALSE)
+out_pr <- evaluate_pr_models(list(YOLOv12strat2224, Casv2strat2224), 
+                             stratify_region = TRUE)
 
 
 pr_all <- out_pr$pr_all
@@ -41,7 +37,7 @@ p_f1 <- ggplot(pr_all, aes(x = conf, y = f1, color = model)) +
   
   # Text annotation
   geom_text(
-    data = best_pts[2,],
+    data = best_pts[4,],
     aes(
       label = sprintf("F1 = %.3f, conf = %.2f", f1, conf)
     ),
@@ -61,4 +57,4 @@ p_f1 <- ggplot(pr_all, aes(x = conf, y = f1, color = model)) +
 
 p_f1
 
-save_pr_f1(p_pr, p_f1, id = "2224yolov12_cas", outdir = "../figures/", width = 7)
+save_pr_f1(p_pr, p_f1, id = "2224yolov12_cas_strat", outdir = "../figures/diag2/", width = 7)

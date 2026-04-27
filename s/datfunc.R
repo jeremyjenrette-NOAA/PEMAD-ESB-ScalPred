@@ -39,8 +39,8 @@ parse_timestamp_from_imagename <- function(x, tz = "UTC") {
 build_detection_tables <- function(
     mt,           # manual annotations (any model version)
     at,           # automatic detections (any model version)
-    allimg,       # complete image metadata (constant)
-    meta = NULL   # optional raw metadata (unused if allimg complete)
+    all_test_imgs, # ALL tested images
+    meta = NULL   # metadata
 ) {
   
   #-------------------------------#
@@ -50,7 +50,7 @@ build_detection_tables <- function(
   mt <- mt |>
     clean_names() |>
     mutate(
-      image_id = std_image_id(image_name),
+      image_id = std_image_id(imagename),
       spname = tolower(spname)
     ) |>
     filter(spname == 'scallop')
@@ -58,18 +58,21 @@ build_detection_tables <- function(
   at <- at |>
     clean_names() |>
     mutate(
-      image_id = std_image_id(image_name),
+      image_id = std_image_id(imagename),
       spname   = tolower(spname)
     ) |>
-    filter(spname == "scallop") |>
+    filter(spname == "scallop") # |>
     # keep only images that appear in manual annotations
-    filter(image_id %in% mt$image_id)
+    # filter(image_id %in% mt$image_id)
   
+  all_test_imgs <- all_test_imgs %>%
+    mutate(image_id = std_image_id(imagename)) %>%
+    select(image_id, everything(), -imagename, -img_path)
   #-------------------------------#
   # 2) Prepare image-level metadata
   #-------------------------------#
   
-  meta_img <- allimg |>
+  meta_img <- meta |>
     clean_names() |>
     mutate(
       image_id        = std_image_id(imagename),
@@ -102,26 +105,27 @@ build_detection_tables <- function(
   # 5) Build by-image summaries
   #-------------------------------#
   
+  # ---- counts ----
   man_img <- mt |>
     count(image_id, name = "n_manual")
   
   auto_img <- at |>
     count(image_id, name = "n_auto")
   
-  valid_image_ids <- union(man_img$image_id, auto_img$image_id)
-  
-  img_df <- meta_img |>
-    filter(image_id %in% valid_image_ids) |>
+  # ---- build full image dataframe from ALL images ----
+  img_df <- all_test_imgs |>
+    left_join(meta_img, by = "image_id") |>   # if meta_img has additional covariates
     left_join(man_img,  by = "image_id") |>
     left_join(auto_img, by = "image_id") |>
     mutate(
       n_manual   = replace_na(n_manual, 0L),
-      n_auto_raw = replace_na(n_auto, 0L),
-      validated  = image_id %in% man_img$image_id,
+      n_auto= replace_na(n_auto, 0L),
       
-      # densities (per m^2)
+      neg_img  = !(image_id %in% man_img$image_id),
+      
+      # densities
       man_density  = n_manual   / field_of_view_sq_meter,
-      auto_density = n_auto_raw / field_of_view_sq_meter
+      auto_density = n_auto / field_of_view_sq_meter
     )
   
   #-------------------------------#
@@ -288,4 +292,5 @@ structure_by_region <- function(out,
   
   res
 }
+
 

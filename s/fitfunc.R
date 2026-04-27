@@ -1,13 +1,73 @@
-fit_calibration_gams <- function(model, model_name) {
+fit_calibration_gams <- function(model, model_name, dat_split, use_strat = FALSE) {
   
+  # --- pull raw calibration data ---
   gb_calib  <- get_data(model, model_name, "GB")
   mab_calib <- get_data(model, model_name, "MAB")
-  comb <- rbind(gb_calib, mab_calib)
   
+  # --- apply stratified GAM training filter ---
+  if (use_strat) {
+    
+    # ensure consistent naming
+    dat_split$imagename <- basename(dat_split$imagename)
+    
+    # join + filter helper
+    filter_strat <- function(df) {
+      df$imagename <- basename(df$imagename)
+      
+      df2 <- merge(
+        df,
+        dat_split[, c("imagename", "stratum", "is_test_gam_train")],
+        by = "imagename",
+        all.x = TRUE
+      ) %>%
+        mutate(is_test_gam_train = if_else(is_test_gam_train == "True", TRUE, FALSE))
+      
+      # keep ONLY GAM training set
+      df2 <- df2[df2$is_test_gam_train == TRUE, ]
+      
+      df2$stratum = factor(df2$stratum)
+      
+      return(df2)
+    }
+    
+    gb_calib  <- filter_strat(gb_calib)
+    mab_calib <- filter_strat(mab_calib)
+    
+    cat("GB n:", nrow(gb_calib), "\n")
+    cat("MAB n:", nrow(mab_calib), "\n")
+    
+    # --- fit STRATIFIED GAMs ---
+    m_gb <- mgcv::gam(
+      y ~ s(conf, bottom_depth, k = 5) +
+        s(conf, boxsize, k = 7) +
+        s(latitude, longitude, k = 7) + 
+        s(altitude, backscatter, k = 7),
+      family = binomial(),
+      data = gb_calib,
+      method = "REML"
+    )
+    
+    m_mab <- mgcv::gam(
+      y ~ s(conf, bottom_depth, k = 5) +
+        s(conf, boxsize, k = 7) +
+        s(latitude, longitude, k = 7) + 
+        s(altitude, backscatter, k = 7),
+      family = binomial(),
+      data = mab_calib,
+      method = "REML"
+    )
+    
+  } else {
+  
+  # --- sanity check ---
+  cat("GB n:", nrow(gb_calib), "\n")
+  cat("MAB n:", nrow(mab_calib), "\n")
+  
+  # --- fit GAMs ---
   m_gb <- mgcv::gam(
     y ~ s(conf, bottom_depth, k = 5) +
       s(altitude, backscatter, k = 7) +
-      s(latitude, longitude, k = 7),
+      s(latitude, longitude, k = 7), # + s(stratum, bs = "re"),
     family = binomial(),
     data = gb_calib,
     method = "REML"
@@ -16,29 +76,22 @@ fit_calibration_gams <- function(model, model_name) {
   m_mab <- mgcv::gam(
     y ~ s(conf, bottom_depth, k = 5) +
       s(altitude, backscatter, k = 7) +
-      s(latitude, longitude, k = 7),
+      s(latitude, longitude, k = 7), # + s(stratum, bs = "re"),
     family = binomial(),
     data = mab_calib,
     method = "REML"
   )
   
-  m_comb <- gam(
-    y ~ 
-      s(conf, bottom_depth, k = 3),
-    family = binomial(),
-    data = comb,
-    method = "REML",
-    select = FALSE
-  )
+  }
   
   list(
     model_name = model_name,
     GB  = m_gb,
-    MAB = m_mab,
-    comb = m_comb
+    MAB = m_mab
   )
 }
 
+# DEPRECATED!!!
 fitimage_calibration_mod <- function(model, model_name, p_detect) {
   
   gb_img  <- get_data(model, model_name, "GB", imglvl = TRUE)
@@ -113,28 +166,30 @@ fitimage_calibration_mod <- function(model, model_name, p_detect) {
   )
 }
 
-run_model_pipeline <- function(model, model_name) {
+
+run_model_pipeline <- function(model, model_name, gams, 
+                               use_strat = FALSE, dat_split = NULL) {
   
-  gams <- fit_calibration_gams(
-    model = model,
-    model_name = model_name
-  )
+  # gams <- fit_calibration_gams(
+  #   model = model,
+  #   model_name = model_name
+  # )
   
-  pred_gb <- predict_calibration_by_depth(
-    gam = gams$GB,
-    calib_df = get_data(model, model_name, "GB"),
-    depth_breaks = c(40, 80, 120),
-    region = "GB",
-    model_name = model_name
-  )
-  
-  pred_mab <- predict_calibration_by_depth(
-    gam = gams$MAB,
-    calib_df = get_data(model, model_name, "MAB"),
-    depth_breaks = c(40, 50, 60, 70),
-    region = "MAB",
-    model_name = model_name
-  )
+  # pred_gb <- predict_calibration_by_depth(
+  #   gam = gams$GB,
+  #   calib_df = get_data(model, model_name, "GB"),
+  #   depth_breaks = c(40, 80, 120),
+  #   region = "GB",
+  #   model_name = model_name
+  # )
+  # 
+  # pred_mab <- predict_calibration_by_depth(
+  #   gam = gams$MAB,
+  #   calib_df = get_data(model, model_name, "MAB"),
+  #   depth_breaks = c(40, 50, 60, 70),
+  #   region = "MAB",
+  #   model_name = model_name
+  # )
   
   out_pr <- evaluate_pr_models(list(model), stratify_region = TRUE)
   best_pts <- out_pr$pr_all %>%
@@ -147,22 +202,32 @@ run_model_pipeline <- function(model, model_name) {
   f1conf_mab <- best_pts$conf[2]
   
   res_gb <- compute_image_level_counts(
-    calib_df  = get_data(model, model_name, "GB"),
+    calib_df  = get_data(model, model_name, "GB", imglvl = FALSE),
     gam       = gams$GB,
     region    = "GB",
     model_name = model_name,
-    f1_thresh = f1conf_gb
+    f1_thresh = f1conf_gb,
+    dat_split = dat_split,
+    use_strat = use_strat
   )
   
   res_mab <- compute_image_level_counts(
-    calib_df  = get_data(model, model_name, "MAB"),
+    calib_df  = get_data(model, model_name, "MAB", imglvl = FALSE),
     gam       = gams$MAB,
     region    = "MAB",
     model_name = model_name,
-    f1_thresh = f1conf_mab
+    f1_thresh = f1conf_mab,
+    dat_split = dat_split,
+    use_strat = use_strat
   )
   
-  bind_rows(res_gb$img, res_mab$img)
+  img = bind_rows(res_gb$img, res_mab$img)
+  metrics = bind_rows(res_gb$metrics, res_mab$metrics) %>%
+    mutate(region = c("GB", "MAB"))
+  metrics = bind_rows(metrics, 
+                      compute_combined_metrics(img,region_name = "All Survey Regions"))
+  
+  list(img = img, metrics = metrics)
 }
 
 attach_metadata_to_images <- function(img_df, meta_df) {

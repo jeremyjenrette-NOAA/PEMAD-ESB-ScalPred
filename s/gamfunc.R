@@ -76,7 +76,7 @@ predict_calibration_by_depth <- function(gam,
                                          conf_grid = seq(0, 1, by = 0.01)) {
   
   bins <- make_depth_bins(calib_df, breaks = depth_breaks)
-  
+  box  <- median(calib_df$boxsize,  na.rm = TRUE)
   lat  <- median(calib_df$latitude,  na.rm = TRUE)
   lon  <- median(calib_df$longitude, na.rm = TRUE)
   fov  <- median(calib_df$field_of_view_sq_meter, na.rm = TRUE)
@@ -91,6 +91,7 @@ predict_calibration_by_depth <- function(gam,
       bottom_depth = unname(bins$mids[as.character(depth_bin)]),
       latitude = lat,
       longitude = lon,
+      boxsize = box,
       field_of_view_sq_meter = fov,
       backscatter = backscatter,
       altitude = altitude,
@@ -132,7 +133,38 @@ compute_image_level_counts <- function(calib_df,
                                        region,
                                        model_name,
                                        f1_thresh,
+                                       use_strat = FALSE,
+                                       dat_split,
                                        conf_col = "conf") {
+  
+  # --- apply stratified GAM training filter ---
+  if (use_strat) {
+    
+    # ensure consistent naming
+    dat_split$imagename <- basename(dat_split$imagename)
+    
+    # join + filter helper
+    filter_strat <- function(df) {
+      df$imagename <- basename(df$imagename)
+      
+      df2 <- merge(
+        df,
+        dat_split[, c("imagename", "stratum", "is_test_gam_test")],
+        by = "imagename",
+        all.x = TRUE
+      ) %>%
+        mutate(is_test_gam_test = if_else(is_test_gam_test == "True", TRUE, FALSE))
+      
+      # keep ONLY GAM test set
+      df2 <- df2[df2$is_test_gam_test == TRUE, ]
+      
+      df2$stratum = factor(df2$stratum)
+      
+      return(df2)
+    }
+    
+    calib_df  <- filter_strat(calib_df)
+  }
   
   calib_df <- calib_df |>
     dplyr::mutate(
@@ -141,13 +173,22 @@ compute_image_level_counts <- function(calib_df,
     )
   
   img <- calib_df |>
-    dplyr::group_by(image_id) |>
+    dplyr::group_by(imagename) |>
     dplyr::summarise(
       raw_detection_number = dplyr::n(),
       predicted_f1_number  = sum(conf_val >= f1_thresh, na.rm = TRUE),
       predicted_number     = sum(pred_p, na.rm = TRUE),
-      true_number          = sum(y, na.rm = TRUE),
+      true_positive        = sum(y, na.rm = TRUE),  # keep this for diagnostics
       .groups = "drop"
+    ) |>
+    dplyr::left_join(
+      dat_split |>
+        dplyr::select(imagename, n_annotations),
+      by = "imagename"
+    ) |>
+    dplyr::mutate(
+      true_number = n_annotations,
+      false_negative = true_number - true_positive
     ) |>
     dplyr::mutate(region = region, model = model_name)
   
@@ -309,7 +350,9 @@ compute_zoom_limits <- function(df, x, y, q = 0.9) {
 plot_image_level_fit_zoom <- function(img_df,
                                       metrics_df,
                                       model_name,
-                                      zoom_q = 0.9) {
+                                      zoom_q = 0.9,
+                                      plot_title,
+                                      model_label) {
   
   metrics_df <- metrics_df |>
     mutate(
@@ -337,20 +380,23 @@ plot_image_level_fit_zoom <- function(img_df,
     geom_text(
       data = metrics_df,
       aes(x = -Inf, y = Inf, label = label),
-      hjust = -0.4, vjust = 1.1,
+      hjust = -0.4, vjust = 1.5,
       inherit.aes = FALSE
     ) +
-    coord_cartesian(
-      xlim = c(0, max(zoom_limits$x_max)),
-      ylim = c(0, max(zoom_limits$y_max))
+    geom_blank(
+      data = zoom_limits,
+      aes(x = x_max, y = y_max)
     ) +
-    theme_minimal(base_size = 13) +
+    theme_bw(base_size = 13) +
     labs(
-      title = paste(model_name, "– True vs Σ P(detection)", sep = " "),
-      subtitle = paste(zoom_q*100,"%"," of images", sep = ""),
-      x = "Predicted (Σ calibrated p)",
+      title = plot_title, 
+      subtitle = model_label,
+      # subtitle = paste(zoom_q*100,"%"," of images", sep = ""),
+      x = "Σ p(detection)",
       y = "Manual count"
-    )
+    ) + 
+    theme(plot.title = element_text(size = 17),
+          strip.text = element_text(size = 12, face = "bold", color = "black"))
 }
 
 
