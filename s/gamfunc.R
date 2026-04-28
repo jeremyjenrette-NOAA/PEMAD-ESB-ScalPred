@@ -137,73 +137,121 @@ compute_image_level_counts <- function(calib_df,
                                        dat_split,
                                        conf_col = "conf") {
   
-  # --- apply stratified GAM training filter ---
+  library(dplyr)
+  
+  # --- normalize imagenames ---
+  calib_df <- calib_df %>%
+    mutate(imagename = basename(imagename))
+  
+  dat_split <- dat_split %>%
+    mutate(imagename = basename(imagename))
+  
+  # --- define image set ---
   if (use_strat) {
-    
-    # ensure consistent naming
-    dat_split$imagename <- basename(dat_split$imagename)
-    
-    # join + filter helper
-    filter_strat <- function(df) {
-      df$imagename <- basename(df$imagename)
-      
-      df2 <- merge(
-        df,
-        dat_split[, c("imagename", "stratum", "is_test_gam_test")],
-        by = "imagename",
-        all.x = TRUE
-      ) %>%
-        mutate(is_test_gam_test = if_else(is_test_gam_test == "True", TRUE, FALSE))
-      
-      # keep ONLY GAM test set
-      df2 <- df2[df2$is_test_gam_test == TRUE, ]
-      
-      df2$stratum = factor(df2$stratum)
-      
-      return(df2)
-    }
-    
-    calib_df  <- filter_strat(calib_df)
+    test_images <- dat_split %>%
+      filter(tolower(is_test_gam_test) == "true") %>%
+      pull(imagename) %>%
+      unique()
+  } else {
+    test_images <- unique(calib_df$imagename)
   }
   
-  calib_df <- calib_df |>
-    dplyr::mutate(
-      pred_p  = stats::predict(gam, newdata = calib_df, type = "response"),
+  img_test_df <- data.frame(imagename = test_images)
+  
+  # =========================================================
+  # 🔹 DETECTION-LEVEL (preserve structure)
+  # =========================================================
+  
+  calib_df <- calib_df %>%
+    filter(imagename %in% test_images) %>%
+    mutate(
+      pred_p   = predict(gam, newdata = ., type = "response"),
       conf_val = .data[[conf_col]]
     )
   
-  img <- calib_df |>
-    dplyr::group_by(imagename) |>
-    dplyr::summarise(
-      raw_detection_number = dplyr::n(),
+  # =========================================================
+  # 🔹 IMAGE-LEVEL (build from scratch — includes zeros)
+  # =========================================================
+  
+  det_summary <- calib_df %>%
+    group_by(imagename) %>%
+    summarise(
+      raw_detection_number = n(),
       predicted_f1_number  = sum(conf_val >= f1_thresh, na.rm = TRUE),
       predicted_number     = sum(pred_p, na.rm = TRUE),
-      true_positive        = sum(y, na.rm = TRUE),  # keep this for diagnostics
+      true_positive        = sum(y, na.rm = TRUE),
       .groups = "drop"
-    ) |>
-    dplyr::left_join(
-      dat_split |>
-        dplyr::select(imagename, n_annotations),
-      by = "imagename"
-    ) |>
-    dplyr::mutate(
-      true_number = n_annotations,
-      false_negative = true_number - true_positive
-    ) |>
-    dplyr::mutate(region = region, model = model_name)
-  
-  metrics <- img |>
-    dplyr::summarise(
-      # calibrated GAM counts
-      r2_calibrated   = summary(stats::lm(true_number ~ predicted_number))$adj.r.squared,
-      rmse_calibrated = sqrt(mean((true_number - predicted_number)^2)),
-      
-      # F1-threshold counts
-      r2_f1   = summary(stats::lm(true_number ~ predicted_f1_number))$adj.r.squared,
-      rmse_f1 = sqrt(mean((true_number - predicted_f1_number)^2))
     )
   
-  list(img = img, metrics = metrics)
+  img <- img_test_df %>%
+    left_join(det_summary, by = "imagename") %>%
+    mutate(
+      raw_detection_number = replace_na(raw_detection_number, 0),
+      predicted_f1_number  = replace_na(predicted_f1_number, 0),
+      predicted_number     = replace_na(predicted_number, 0),
+      true_positive        = replace_na(true_positive, 0)
+    ) %>%
+    left_join(
+      dat_split %>%
+        select(
+          imagename,
+          altitude,
+          chlorophyll,
+          cdom,
+          t,
+          s,
+          heading,
+          o2,
+          v_depth,
+          bottom_depth,
+          backscatter,
+          latitude,
+          longitude,
+          field_of_view_sq_meter,
+          millimeter_per_pixel,
+          datetime,
+          stratum,
+          is_test_gam_test,
+          n_annotations
+        ),
+      by = "imagename"
+    ) %>%
+    mutate(
+      true_number   = n_annotations,
+      false_negative = true_number - true_positive,
+      
+      true_density      = true_number / field_of_view_sq_meter,
+      predicted_density = predicted_number / field_of_view_sq_meter,
+      
+      region = region,
+      model  = model_name
+    )
+  
+  # =========================================================
+  # 🔹 METRICS
+  # =========================================================
+  
+  metrics <- img %>%
+    summarise(
+      r2_calibrated   = summary(lm(true_number ~ predicted_number))$adj.r.squared,
+      rmse_calibrated = sqrt(mean((true_number - predicted_number)^2, na.rm = TRUE)),
+      
+      r2_f1   = summary(lm(true_number ~ predicted_f1_number))$adj.r.squared,
+      rmse_f1 = sqrt(mean((true_number - predicted_f1_number)^2, na.rm = TRUE)),
+      
+      n_images = n(),
+      n_zero_images = sum(raw_detection_number == 0)
+    )
+  
+  # =========================================================
+  # 🔹 RETURN
+  # =========================================================
+  
+  list(
+    img = img,
+    metrics = metrics,
+    calib_df = calib_df
+  )
 }
 
 compute_combined_metrics <- function(img_df, region_name = "GB_MAB") {

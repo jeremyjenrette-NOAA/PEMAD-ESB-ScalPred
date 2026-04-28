@@ -2,8 +2,8 @@ library(mgcv)
 source("./datfunc.R")
 source("./fitfunc.R")
 
-load("../data/processed/Casfixed2022.RData")
-load("../data/processed/YOLOv11fixed2022.RData")
+# load("../data/processed/Casfixed2022.RData")
+# load("../data/processed/YOLOv11fixed2022.RData")
 meta2224 <- read.csv("../data/processed/metadata2224.csv")
 
 model1 = YOLOv122224
@@ -13,11 +13,11 @@ model2 = Cas2224
 model_name2 = deparse(substitute(Cas2224))
 
 img_yolo  <- run_model_pipeline(model1, model_name1)
-img_cascade  <- run_model_pipeline(model2, model_name2)
+img_cas  <- run_model_pipeline(model2, model_name2)
 
 # for some reason, there is a very small number of mismatch images
 # this makes sure the gam receives only the matches
-common_ids <- intersect(img_yolo$image_id, img_cascade$image_id)
+common_ids <- intersect(img_yolo$image_id, img_cas$image_id)
 
 img_combined <- img_yolo %>%
   filter(image_id %in% common_ids) %>%
@@ -25,7 +25,7 @@ img_combined <- img_yolo %>%
          pred_yolo = predicted_number,
          true_number) %>%
   left_join(
-    img_cascade %>%
+    img_cas %>%
       filter(image_id %in% common_ids) %>%
       select(image_id,
              pred_cascade = predicted_number),
@@ -34,7 +34,11 @@ img_combined <- img_yolo %>%
   mutate(
     pred_mean = (pred_yolo + pred_cascade)/2,
     pred_diff = pred_cascade - pred_yolo,
-    pred_sum  = pred_yolo + pred_cascade
+    pred_sum  = pred_yolo + pred_cascade,
+    log_yolo_pred = log1p(pred_yolo),
+    log_cascade_pred = log1p(pred_cascade),
+    log_pred_diff = log1p(abs(pred_diff)),
+    log_true_number = log1p(true_number + 1e-6)
   )
 
 img_combined <- attach_metadata_to_images(
@@ -54,12 +58,31 @@ models <- list(
            family = nb(), data = img_combined),
   
   m4 = gam(true_number ~ ti(pred_yolo, pred_cascade) + pred_diff, 
-           family = nb(), data = img_combined)
+           family = nb(), data = img_combined),
   
   # m5 = gam(true_number ~ ti(pred_yolo, pred_cascade) +
   #   s(pred_yolo - pred_cascade) + ti(pred_yolo, pred_cascade, by = pred_diff),
-  #   family = nb(), data = img_combined)
-)
+  #   family = nb(), data = img_combined),
+  
+  m6 = gam(true_number ~ s(pred_yolo, pred_diff, bs = "tp"),
+           family = nb(), data = img_combined),
+  
+  m7 = gam(true_number ~ s(log_yolo_pred, pred_diff),
+           family = nb(), data = img_combined),
+  
+  m8 = gam(true_number ~ s(log_cascade_pred, pred_diff),
+           family = nb(), data = img_combined),
+  
+  m9 = gam(true_number ~ s(log_yolo_pred, pred_diff, bs = "tp"),
+            family = nb(), data = img_combined),
+  
+  m10 = gam(log_true_number ~ s(log_yolo_pred, log_pred_diff),
+           family = nb(), data = img_combined),
+  
+  m11 = gam(log_true_number ~ s(log_yolo_pred, pred_diff),
+           family = nb(), data = img_combined)
+  )
+
 
 evaluate_model <- function(model, data) {
   pred <- predict(model, type = "response")
@@ -81,7 +104,7 @@ rownames(results_df) <- names(models)  # keep m1, m2, etc.
 results_df
 
 df_eval <- data.frame(
-  pred = predict(models$m1, type = "response"),
+  pred = exp(predict(models$m11, type = "response")),
   true = img_combined$true_number
 )
 
@@ -95,40 +118,42 @@ mae  <- mean(abs(pred - true))
 r2 <- cor(pred, true)^2
 
 # Deviance (from model)
-dev <- deviance(models$m1)
+dev <- deviance(models$m11)
 
 # AIC
-aic = AIC(models$m1)
+aic = AIC(models$m11)
 
-plot(residuals(models$m1) ~ img_combined$pred_yolo, main = "YOLO")
+plot(residuals(models$m7) ~ img_combined$pred_yolo, main = "YOLO")
 abline(h=0, col = "red", lty = 2)
-plot(residuals(models$m1) ~ img_combined$pred_cascade, main = "Cascade R-CNN")
+plot(residuals(models$m7) ~ img_combined$pred_cascade, main = "Cascade R-CNN")
+abline(h=0, col = "red", lty = 2)
+plot(residuals(models$m7) ~ img_combined$pred_diff, main = "Cascade - YOLO")
 abline(h=0, col = "red", lty = 2)
 ########################################################################
 ## confirm two similar model eval
-library(rsample)
-library(purrr)
-
-folds <- rsample::vfold_cv(img_combined, v = 5)
-
-cv_results <- folds %>%
-  mutate(
-    model = map(splits, ~ gam(
-      true_number ~ te(pred_yolo, pred_cascade) + abs(pred_diff),
-      family = nb(),
-      data = rsample::analysis(.x)
-    )),
-    pred = map2(model, splits, ~ predict(.x, newdata = rsample::assessment(.y), type = "response")),
-    truth = map(splits, ~ rsample::assessment(.x)$true_number)
-  )
-cv_results <- cv_results %>%
-  mutate(
-    rmse = map2_dbl(pred, truth, ~ sqrt(mean((.x - .y)^2))),
-    mae  = map2_dbl(pred, truth, ~ mean(abs(.x - .y)))
-  )
-
-mean(cv_results$rmse)
-mean(cv_results$mae)
+# library(rsample)
+# library(purrr)
+# 
+# folds <- rsample::vfold_cv(img_combined, v = 5)
+# 
+# cv_results <- folds %>%
+#   mutate(
+#     model = map(splits, ~ gam(
+#       true_number ~ te(pred_yolo, pred_cascade) + abs(pred_diff),
+#       family = nb(),
+#       data = rsample::analysis(.x)
+#     )),
+#     pred = map2(model, splits, ~ predict(.x, newdata = rsample::assessment(.y), type = "response")),
+#     truth = map(splits, ~ rsample::assessment(.x)$true_number)
+#   )
+# cv_results <- cv_results %>%
+#   mutate(
+#     rmse = map2_dbl(pred, truth, ~ sqrt(mean((.x - .y)^2))),
+#     mae  = map2_dbl(pred, truth, ~ mean(abs(.x - .y)))
+#   )
+# 
+# mean(cv_results$rmse)
+# mean(cv_results$mae)
 ########################################################################
 library(ggplot2)
 
@@ -162,7 +187,7 @@ label_text <- paste0(
 )
 
 gammod = ggplot(df_eval, aes(x = pred, y = true)) +
-  geom_point(alpha = 0.25, size = 2, color = "#1B9E77") +
+  geom_point(alpha = 0.25, size = 2, color = "black") +
   
   # Perfect prediction line
   # geom_abline(
@@ -175,7 +200,7 @@ gammod = ggplot(df_eval, aes(x = pred, y = true)) +
   # Fitted relationship
   geom_smooth(
     method = "lm",
-    color = "#D95F02",
+    color = "black",
     linewidth = 1.2,
     se = TRUE
   ) +
@@ -194,7 +219,7 @@ gammod = ggplot(df_eval, aes(x = pred, y = true)) +
   
   labs(
     title = "2022 - 2024: Predicted vs True Scallop Counts",
-    subtitle = "Model: true_count ~ s(yolo, cascade - yolo)",
+    subtitle = paste0("Model: ", "true_number ~ s(log_yolo_pred, pred_diff)"),
     x = "Predicted Count",
     y = "True Count"
   ) +
@@ -208,8 +233,8 @@ gammod = ggplot(df_eval, aes(x = pred, y = true)) +
   )
 gammod
 
-save_cal(disagreement, id = paste("disagreement_2224yolov12cas",sep=""), 
-         outdir = "../figures/", width = 8.5, height = 5, format = "png")
-
-save_cal(gammod, id = paste("gammod_2224yolov12cas",sep=""), 
-         outdir = "../figures/", width = 6, height = 7, format = "png")
+# save_cal(disagreement, id = paste("disagreement_2224yolov12cas",sep=""), 
+#          outdir = "../figures/", width = 8.5, height = 5, format = "png")
+# 
+save_cal(gammod, id = paste("2224yolov12cas_gammod",sep=""),
+         outdir = "../figures/diag1/", width = 6, height = 7, format = "png")

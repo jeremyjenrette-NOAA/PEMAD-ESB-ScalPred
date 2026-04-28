@@ -7,8 +7,8 @@ source("./procfunc.R")
 load("../data/processed/Cas2224.RData")
 load("../data/processed/YOLOv122224.RData")
 
-model = Cas2224
-model_name = deparse(substitute(Cas2224))
+model = YOLOv12strat2224
+model_name = deparse(substitute(YOLOv12strat2224))
 
 gams <- fit_calibration_gams(
   model = model,
@@ -90,27 +90,29 @@ p_counts_pooled <- plot_image_level_fit(
   include_f1 = FALSE,
   plot_title = paste(model_name, " True vs. Predicted Count", sep = " -")
 )
-p_counts_pooled
+p_counts_pooled = p_counts_pooled + labs(title = "True vs. Predicted Count",
+subtitle = "YOLOv12")
 
 p_zoomed <- plot_image_level_fit_zoom(
-  img_df = img_all |> dplyr::mutate(region = "All Survey Regions"),
-  metrics_df = metrics_all[3,],
+  # img_df = img_all |> dplyr::mutate(region = "All Survey Regions"),
+  img_df = img_all,
+  metrics_df = metrics_all[1:2,],
   model_name = model_name,
   zoom_q=0.95
 )
 p_zoomed
 
 save_cal(p_cal, id = paste("bydepth_",model_name,sep=""), 
-         outdir = "../figures/", format = "png", width = 7)
+         outdir = "../figures/diag1/", format = "png", width = 7)
 
 save_cal(p_counts, id = paste("fit_",model_name,sep=""), 
          outdir = "../figures/", format = "png")
 
 save_cal(p_counts_pooled, id = paste("fitpooled_",model_name,sep=""), 
-         outdir = "../figures/", width = 5, height = 7, format = "png")
+         outdir = "../figures/diag1/", width = 5, height = 7, format = "png")
 
 save_cal(p_zoomed, id = paste("fit_zoomedALL_",model_name,sep=""), 
-         outdir = "../figures/", width = 5, height = 7, format = "png")
+         outdir = "../figures/diag1/", width = 5, height = 7, format = "png")
 ######
 vis.gam(gams$GB,
         view = c("conf", "bottom_depth"),

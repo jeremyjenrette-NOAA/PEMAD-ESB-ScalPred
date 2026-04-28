@@ -1,5 +1,9 @@
 source("./fitfunc.R")
 source("./gamfunc.R")
+source("./procfunc.R")
+
+load("../data/processed/Casv2strat2224.RData")
+load("../data/processed/YOLOv12strat2224.RData")
 
 dat_split = read.csv("../data/raw/dataset_split_2224.csv")
 table(dat_split$is_test_gam_train)
@@ -71,5 +75,73 @@ p_zoomed <- plot_image_level_fit_zoom(
 )
 p_zoomed
 
+p_resid = pred$img %>%
+  mutate(residual = predicted_number - true_number) %>%
+  ggplot(aes(true_number, residual)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(title = "Residuals vs True Count",
+       subtitle = "Cascade R-CNN")
+
+# strong, but how to visualize after calibration?
+p_fn = ggplot(pred$img, aes(true_number, false_negative)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth() +
+  labs(title = "False negatives vs true abundance")
+
+# for each break of p(detection), what is the average true positive count?
+pred$calib_df %>%
+  mutate(bin = cut(pred_p, breaks = seq(0,1,0.1))) %>%
+  group_by(bin) %>%
+  summarise(
+    observed = mean(y),
+    predicted = mean(pred_p)
+  ) %>%
+  mutate(
+    r2   = summary(stats::lm(observed ~ predicted))$adj.r.squared,
+  ) %>%
+  ggplot(aes(predicted, observed)) +
+  geom_point() +
+  geom_text(
+    aes(x = -Inf, y = Inf, label = paste0("R²=", round(r2, 2) ) ),
+    hjust = -0.5, vjust = 1.5,
+    inherit.aes = FALSE
+  ) +
+  geom_abline(slope = 1, intercept = 0) +
+  labs(title = "Calibration curve",
+       subtitle = "for each seq of p(detection), what is the average true positive count?")
+
+summary_df <- data.frame(
+  metric = c("True", "Raw detector", "Calibrated", "F1-cutoff"),
+  value  = c(
+    sum(pred$img$n_annotations, na.rm = TRUE),
+    sum(pred$calib_df$conf, na.rm = TRUE),
+    sum(pred$calib_df$pred_p, na.rm = TRUE),
+    sum(pred$img$predicted_f1_number, na.rm = TRUE)
+  )
+)
+
+p_sum = ggplot(summary_df, aes(x = metric, y = value, fill = metric)) +
+  geom_col(width = 0.6) +
+  geom_hline(yintercept = summary_df$value[1], linetype = "dashed", color = "black") +
+  geom_text(aes(label = round(value, 0)), vjust = -0.5) +
+  theme_minimal() +
+  labs(
+    title = "Total scallop abundance",
+    subtitle = "Cascade R-CNN",
+    x = "",
+    y = "Total count"
+  ) +
+  theme(legend.position = "none")
+p_sum
+
 save_cal(p_zoomed, id = paste("2224_",model_name, "_count_strat",sep=""), 
          outdir = "../figures/diag2/", format = "png", width = 9)
+save_cal(p_resid, id = paste("2224_",model_name, "_resid_strat",sep=""), 
+         outdir = "../figures/diag2/", format = "png", width = 5, height = 4.5)
+save_cal(p_fn, id = paste("2224_",model_name, "_fn_strat",sep=""), 
+         outdir = "../figures/diag2/", format = "png", width = 5, height = 4.5)
+save_cal(p_sum, id = paste("2224_",model_name, "_sum_strat",sep=""), 
+         outdir = "../figures/diag2/", format = "png", width = 5, height = 4.5)
+
+

@@ -39,9 +39,9 @@ fit_calibration_gams <- function(model, model_name, dat_split, use_strat = FALSE
     # --- fit STRATIFIED GAMs ---
     m_gb <- mgcv::gam(
       y ~ s(conf, bottom_depth, k = 5) +
-        s(conf, boxsize, k = 7) +
-        s(latitude, longitude, k = 7) + 
-        s(altitude, backscatter, k = 7),
+        # s(conf, boxsize, k = 7) +
+        s(latitude, longitude, k = 7), 
+        # s(altitude, backscatter, k = 7),
       family = binomial(),
       data = gb_calib,
       method = "REML"
@@ -49,11 +49,21 @@ fit_calibration_gams <- function(model, model_name, dat_split, use_strat = FALSE
     
     m_mab <- mgcv::gam(
       y ~ s(conf, bottom_depth, k = 5) +
-        s(conf, boxsize, k = 7) +
+        # s(conf, boxsize, k = 7) +
+        s(latitude, longitude, k = 7), 
+        # s(altitude, backscatter, k = 7),
+      family = binomial(),
+      data = mab_calib,
+      method = "REML"
+    )
+    
+    m_comb <- mgcv::gam(
+      y ~ s(conf, bottom_depth, k = 5) +
+        # s(conf, boxsize, k = 7) +
         s(latitude, longitude, k = 7) + 
         s(altitude, backscatter, k = 7),
       family = binomial(),
-      data = mab_calib,
+      data = bind_rows(gb_calib,mab_calib),
       method = "REML"
     )
     
@@ -191,6 +201,9 @@ run_model_pipeline <- function(model, model_name, gams,
   #   model_name = model_name
   # )
   
+  dat_split_gb <- dat_split %>% filter(latitude > 40)
+  dat_split_mab <- dat_split %>% filter(latitude < 40)
+  
   out_pr <- evaluate_pr_models(list(model), stratify_region = TRUE)
   best_pts <- out_pr$pr_all %>%
     group_by(model) %>%
@@ -207,7 +220,7 @@ run_model_pipeline <- function(model, model_name, gams,
     region    = "GB",
     model_name = model_name,
     f1_thresh = f1conf_gb,
-    dat_split = dat_split,
+    dat_split = dat_split_gb,
     use_strat = use_strat
   )
   
@@ -217,17 +230,19 @@ run_model_pipeline <- function(model, model_name, gams,
     region    = "MAB",
     model_name = model_name,
     f1_thresh = f1conf_mab,
-    dat_split = dat_split,
+    dat_split = dat_split_mab,
     use_strat = use_strat
   )
   
   img = bind_rows(res_gb$img, res_mab$img)
+  calib_df = bind_rows(res_gb$calib_df, res_mab$calib_df)
+  
   metrics = bind_rows(res_gb$metrics, res_mab$metrics) %>%
     mutate(region = c("GB", "MAB"))
   metrics = bind_rows(metrics, 
                       compute_combined_metrics(img,region_name = "All Survey Regions"))
   
-  list(img = img, metrics = metrics)
+  list(img = img, metrics = metrics, calib_df = calib_df)
 }
 
 attach_metadata_to_images <- function(img_df, meta_df) {

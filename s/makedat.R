@@ -8,9 +8,9 @@ at_cas <- read.csv("../data/raw/2224scallop_viame_370248/autotest2224_viame_casc
   rename(spname = Spname) %>%
   rename(imagename = Imagename)
 
-# mt_cas <- read.csv("../data/raw/2224scallop_viame_370248/mantest2224_viame_cascade.csv") %>%
-#   rename(spname = Spname) %>%
-#   rename(imagename = Imagename)
+mt_cas <- read.csv("../data/raw/2224scallop_viame_370248/mantest2224_viame_cascade.csv") %>%
+  rename(spname = Spname) %>%
+  rename(imagename = Imagename)
 
 #============================================================#
 # read data
@@ -36,7 +36,7 @@ names(res)
 ####
 dat_split = read.csv("../data/raw/dataset_split_2224.csv")
 
-meta_std <- dat_split %>%
+dat_split <- dat_split %>%
   rename(
     # Imagename              = imagename,
     altitude               = ALTIMETER_ALTITUDE_METER,
