@@ -270,7 +270,8 @@ plot_calibration_by_depth_envelopes <- function(
     line_size = 1.2,
     smooth_se = FALSE,
     point_color = "grey60",
-    show_bin_n = TRUE
+    show_bin_n = TRUE,
+    model_name
 ) {
   library(dplyr)
   library(ggplot2)
@@ -356,7 +357,7 @@ plot_calibration_by_depth_envelopes <- function(
       linewidth = line_size
     ) +
     labs(
-      x = "YOLO confidence",
+      x = paste0(model_name," confidence"),
       y = "P(detection)",
       color = "Depth envelope (m)",
       title = "Calibration function by depth envelope",
@@ -385,4 +386,160 @@ bb2length <- function(tlx, tly, brx, bry, mm_per_pixel = NA) {
     length_px = length_px,
     length_mm = length_mm
   )
+}
+
+################################################################################
+# From calpred.R 
+################################################################################
+
+load_detections <- function(config) {
+  
+  file <- paste0(config$paths$detections, "detections_", 
+                 config$model, "_", config$year, ".csv")
+  
+  df <- read.csv(file)
+  
+  if (config$model == "cas") {
+    df <- df %>%
+      
+      # 1. Drop unwanted columns
+      select(
+        -X3..Unique.Frame.Identifier,
+        -Confidence.Pairs.or.Attributes
+      ) %>%
+      
+      # 2. Rename columns to match YOLO format
+      rename(
+        Detectid  = X..1..Detection.or.Track.id,
+        Imagename = X2..Video.or.Image.Identifier,
+        TLx       = X4.7..Img.bbox.TL_x,
+        TLy       = TL_y,
+        BRx       = BR_x,
+        BRy       = BR_y.,
+        Conf      = X8..Detection.or.Length.Confidence,
+        Spname    = X10.11...Repeated.Species
+      ) %>%
+      
+      # 3. Add missing columns (to match YOLO structure)
+      mutate(
+        img_path      = NA_character_,
+        pred_datetime = NA_character_,
+        model         = "cascade_rcnn",  # or whatever label you prefer
+        split         = NULL,             # ensure it's not present
+        year = config$year
+      ) %>%
+      
+      # 4. Reorder columns to match YOLO exactly (excluding split)
+      dplyr::select(
+        Detectid, Imagename, TLx, TLy, BRx, BRy,
+        Conf, Spname, img_path, pred_datetime,
+        model, year
+      ) %>%
+      slice(-1)
+  } else if (config$model == "yolo") {
+    df <- df
+  }
+  
+  return(df)
+}
+
+load_all_data <- function(config) {
+  
+  detections <- load_detections(config)
+  
+  if (config$model == "cas") {
+  completed <- read.table(paste0(config$paths$completed, "completed_", config$model, "_", config$year, ".txt")) %>%
+       rename(Imagename = V1) %>%
+    mutate(
+      Imagename = basename(gsub("\\\\", "/", Imagename))
+    )
+  } else {
+  completed <- read.table(paste0(config$paths$completed, "completed_", config$model, "_", config$year, ".txt")) %>%
+      rename(Imagename = V1)
+  }
+  
+  # metadata <- read.csv(
+  #   paste0(config$paths$metadata)
+  # )
+  # 
+  # inventory <- readRDS(
+  #   paste0(config$paths$inventory)
+  # )
+  
+  return(list(
+    detections = detections,
+    completed  = completed
+    # metadata   = metadata,
+    # inventory  = inventory
+  ))
+}
+
+process_predictions <- function(gams, data, config, f1conf_gb, f1conf_mab) {
+  
+  df <- compile_calibrated_image_df(
+    gams = gams, 
+    pred_detections = data$detections, 
+    pred_allimgs = data$completed, 
+    meta   = data$metadata,
+    f1conf_gb = f1conf_gb,
+    f1conf_mab = f1conf_mab
+  )
+  
+  # ---- Add region ----
+  df <- df %>%
+    mutate(region = ifelse(latitude > config$region_split_lat, "GB", "MAB"))
+  
+  # ---- Length estimation ----
+  if (config$estimate_length) {
+    df <- df %>%
+      mutate(
+        length_px = ((BRx - TLx) + (BRy - TLy)) / 2,
+        length_mm = length_px * millimeter_per_pixel
+      )
+  }
+  
+  return(df)
+}
+
+aggregate_image_level <- function(df) {
+  
+  df %>%
+    group_by(Imagename, region) %>%
+    summarise(
+      n_raw = n(),
+      n_prob = sum(p_detection, na.rm = TRUE),
+      density = sum(p_detection) / mean(field_of_view_sq_meter),
+      .groups = "drop"
+    )
+}
+
+plot_length_distribution <- function(df, config) {
+  
+  p <- ggplot(df, aes(x = length_mm, weight = p_detection)) +
+    geom_histogram(bins = 50, fill = "darkgreen") +
+    labs(
+      x = "Length (mm)",
+      y = "Expected individuals"
+    ) +
+    theme_minimal()
+  
+  if (config$facet_by_year) {
+    p <- p + facet_wrap(~year)
+  }
+  
+  return(p)
+}
+
+plot_depth_effects <- function(df, config) {
+  
+  p <- ggplot(df, aes(x = bottom_depth, y = p_detection)) +
+    geom_point(alpha = 0.2) +
+    geom_smooth() +
+    theme_minimal()
+  
+  if (config$facet_by_region) {
+    p <- p + facet_wrap(~region)
+  }
+  
+  return(p)
 }

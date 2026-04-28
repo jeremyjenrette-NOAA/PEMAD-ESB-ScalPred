@@ -7,51 +7,135 @@ library(ggplot2)
 library(maps)
 library(scales)
 library(lubridate)
+source("../s/datfunc.R")
 source("../s/gamfunc.R")
 source("../s/fitfunc.R")
 source("../s/procfunc.R")
 source("./predfunc.R")
 
 load("../data/processed/YOLOv122224.RData")
+load("../data/processed/Cas2224.RData")
 
-model = YOLOv122224
-model_name = deparse(substitute(YOLOv122224))
+model1 = YOLOv122224
+model_name1 = deparse(substitute(YOLOv122224))
 
-gams <- fit_calibration_gams(
-  model = model,
-  model_name = model_name
+model2 = Cas2224
+model_name2 = deparse(substitute(Cas2224))
+
+gams1 <- fit_calibration_gams(
+  model = model1,
+  model_name = model_name1
 )
-summary(gams$GB)
+summary(gams1$GB)
+
+gams2 <- fit_calibration_gams(
+  model = model2,
+  model_name = model_name2
+)
+summary(gams2$GB)
+
+source("../s/gammod.R")
+
+img_level_gam = models$m1
+summary(img_level_gam)
+
 ########################################################################
 # Load predictions + metadata
-pred_detections = rbind(
-  read.csv("../data/raw/2022_pred/detections_2022.csv") %>% mutate(year = 2022),
-  read.csv("../data/raw/2023_pred/detections_2023.csv") %>% mutate(year = 2023),
-  read.csv("../data/raw/2024_pred/detections_2024.csv") %>% mutate(year = 2024)
+pred_detections_yolo = rbind(
+  read.csv("../data/raw/2022_pred/detections_yolo_2022.csv") %>% mutate(year = 2022),
+  read.csv("../data/raw/2023_pred/detections_yolo_2023.csv") %>% mutate(year = 2023),
+  read.csv("../data/raw/2024_pred/detections_yolo_2024.csv") %>% mutate(year = 2024)
 )
-colnames(pred_detections)
-table(pred_detections$year)
+colnames(pred_detections_yolo)
+table(pred_detections_yolo$year)
 
-pred_allimgs = rbind(
-  (read.table("../data/raw/2022_pred/completed_2022.txt") %>%
+pred_allimgs_yolo = rbind(
+  (read.table("../data/raw/2022_pred/completed_yolo_2022.txt") %>%
      rename(Imagename = V1) %>%
      mutate(Imagename = basename(Imagename),
             year = 2022)),
-  (read.table("../data/raw/2023_pred/completed_2023.txt") %>%
+  (read.table("../data/raw/2023_pred/completed_yolo_2023.txt") %>%
   rename(Imagename = V1) %>%
   mutate(Imagename = basename(Imagename),
          year = 2023)),
-  (read.table("../data/raw/2024_pred/completed_2024.txt") %>%
+  (read.table("../data/raw/2024_pred/completed_yolo_2024.txt") %>%
     rename(Imagename = V1) %>%
     mutate(Imagename = basename(Imagename),
            year = 2024))
 )
-table(pred_allimgs$year)
+table(pred_allimgs_yolo$year)
+
+
+pred_detections_cas = rbind(
+  # read.csv("../data/raw/2022_pred/detections_cas_2022.csv") %>% mutate(year = 2022),
+  read.csv("../data/processed/detections/detections_cas_2023.csv") %>% mutate(year = 2023),
+  read.csv("../data/processed/detections/detections_cas_2024.csv") %>% mutate(year = 2024)
+)
+colnames(pred_detections_cas)
+table(pred_detections_cas$year)
+
+pred_detections_cas <- pred_detections_cas %>%
+  
+  # 1. Drop unwanted columns
+  select(
+    -X3..Unique.Frame.Identifier,
+    -Confidence.Pairs.or.Attributes
+  ) %>%
+  
+  # 2. Rename columns to match YOLO format
+  rename(
+    Detectid  = X..1..Detection.or.Track.id,
+    Imagename = X2..Video.or.Image.Identifier,
+    TLx       = X4.7..Img.bbox.TL_x,
+    TLy       = TL_y,
+    BRx       = BR_x,
+    BRy       = BR_y.,
+    Conf      = X8..Detection.or.Length.Confidence,
+    Spname    = X10.11...Repeated.Species
+  ) %>%
+  
+  # 3. Add missing columns (to match YOLO structure)
+  mutate(
+    img_path      = NA_character_,
+    pred_datetime = NA_character_,
+    model         = "cascade_rcnn",  # or whatever label you prefer
+    split         = NULL             # ensure it's not present
+  ) %>%
+  
+  # 4. Reorder columns to match YOLO exactly (excluding split)
+  dplyr::select(
+    Detectid, Imagename, TLx, TLy, BRx, BRy,
+    Conf, Spname, img_path, pred_datetime,
+    model, year
+  ) %>%
+  slice(-1)
+
+
+pred_allimgs_cas = rbind(
+  # (read.table("../data/raw/2022_pred/completed_cas_2022.txt") %>%
+  #    rename(Imagename = V1) %>%
+  #    mutate(Imagename = basename(Imagename),
+  #           year = 2022)),
+  (read.table("../data/raw/2023_pred/completed_cas_2023.txt") %>%
+     rename(Imagename = V1) %>%
+     mutate(Imagename = basename(Imagename),
+            year = 2023)),
+  (read.table("../data/raw/2024_pred/completed_cas_2024.txt") %>%
+     rename(Imagename = V1) %>%
+     mutate(Imagename = basename(Imagename),
+            year = 2024))
+) %>%
+ mutate(
+   Imagename = basename(gsub("\\\\", "/", Imagename))
+ )
+table(pred_allimgs_cas$year)
+
+
 
 meta = rbind(
-  read.csv("../data/raw/metapred/processedimages22.csv"),
-  read.csv("../data/raw/metapred/processedimages23.csv"),
-  read.csv("../data/raw/metapred/processedimages24.csv")
+  read.csv("../data/processed/metapred/processedimages2022.csv"),
+  read.csv("../data/processed/metapred/processedimages2023.csv"),
+  read.csv("../data/processed/metapred/processedimages2024.csv")
 )
 colnames(meta)
 
@@ -115,7 +199,7 @@ save_cal(p = p_img_bytime, id = "2224_img_bytime", width = 6, height = 6)
 save_cal(p = p_fps, id = "2224_fps", width = 6)
 
 ########################################################################
-out_pr <- evaluate_pr_models(list(model), 
+out_pr <- evaluate_pr_models(list(model2), 
                              stratify_region = TRUE)
 pr_all <- out_pr$pr_all
 best_pts <- pr_all %>%
@@ -127,18 +211,23 @@ f1conf_gb = best_pts$conf[1]
 f1conf_mab = best_pts$conf[2]
 
 out <- compile_calibrated_image_df(
-  gams = gams,
-  pred_detections = pred_detections,
-  pred_allimgs = pred_allimgs,
+  gams = gams1,
+  pred_detections = pred_detections_cas,
+  pred_allimgs = pred_allimgs_cas,
   meta = meta,
   f1conf_gb = f1conf_gb,
   f1conf_mab = f1conf_mab
 )
 
-img_level_final  <- out$img_level_final
+# filter(altitude < 2.5)
+
+img_level_final  <- out$img_level_final 
 img_level_final_f1 <- out$img_level_final_f1
 pred_calibrated  <- out$pred_calibrated
 pred_master      <- out$pred_master
+
+pred_calibrated$tlx = as.numeric(pred_calibrated$tlx)
+pred_calibrated$tly = as.numeric(pred_calibrated$tly)
 
 pred_lengths <- pred_calibrated %>%
   mutate(
@@ -202,7 +291,7 @@ p_summ = ggplot(plot_df, aes(x = factor(year), y = density, fill = method)) +
     title = "Comparison of abundance estimation methods by year"
   ) +
   theme_minimal()
-save_cal(p = p_summ, outdir = "../figures/", id = "2224_summ", width = 6)
+save_cal(p = p_summ, outdir = "../figures/", id = "2224_summ_yolo", width = 6)
 
 year_summary %>%
   mutate(ratio = total_density_f1 / total_density_cal) %>%
@@ -227,7 +316,7 @@ p_totalcal = ggplot(img_level_final, aes(x = raw_detection_number, y = predicted
     title = "Detection vs calibrated count"
   ) +
   theme_minimal()
-save_cal(p = p_totalcal, outdir = "../figures/", id = "2224_totalcal", width = 6)
+save_cal(p = p_totalcal, outdir = "../figures/", id = "2224_totalcal_yolo", width = 6)
 
 # 1. Create depth bins and counts
 depth_bins <- img_level_final %>%
@@ -277,7 +366,7 @@ p_densedepth <- ggplot() +
   ) +
   labs(
     x = "Bottom depth (m)",
-    title = "Predicted scallop density at depth"
+    title = "Predicted scallop density at depth (YOLO)"
   ) +
   theme_minimal(base_size = 14) +
   theme(
@@ -287,16 +376,16 @@ p_densedepth <- ggplot() +
     panel.grid.minor = element_blank()
   )
 
-p_densedepth
-save_cal(p = p_densedepth, outdir = "../figures/", id = "2224_densedepth", width = 7)
+# p_densedepth
+save_cal(p = p_densedepth, outdir = "../figures/", id = "2224_densedepth_yolo", width = 7)
 
 world <- map_data("world")
 
 df <- img_level_final %>%
-  filter(year %in% c(2022, 2024)) %>%
+  filter(year %in% c(2024)) %>%
   mutate(
     density_cal_plot = density_cal + 1e-6,
-    year = factor(year, levels = c(2022, 2024))
+    year = factor(year, levels = c(2024))
   )
 
 p_mapcal <- ggplot() +
@@ -327,18 +416,18 @@ p_mapcal <- ggplot() +
   ) +
   facet_wrap(~ year, ncol = 1) +
   labs(
-    title = "Predicted scallop density",
+    title = "Predicted scallop density (YOLO)",
     color = "Density (n / m²)"
   ) +
   theme_minimal()
-save_cal(p = p_mapcal, outdir = "../figures/", id = "2224_mapcal", width = 7)
+save_cal(p = p_mapcal, outdir = "../figures/", id = "2224_mapcal_yolo", width = 7)
 
 # should facet this by region
 p_caldepth = plot_calibration_by_depth_envelopes(
-  pred_calibrated,
+  pred_calibrated, model_name = "YOLO",
   depth_envelopes = list(c(10, 60), c(60, 110), c(110, 160))
 )
-save_cal(p = p_caldepth, outdir = "../figures/", id = "2224_caldepth", width = 7)
+save_cal(p = p_caldepth, outdir = "../figures/", id = "2224_caldepth_yolo", width = 7)
 
 p_caldense = ggplot(img_level_final, aes(x = density_raw, y = density_cal)) +
   geom_point(alpha = 0.2) +
@@ -349,10 +438,10 @@ p_caldense = ggplot(img_level_final, aes(x = density_raw, y = density_cal)) +
   labs(
     x = "Raw density (n/m²)",
     y = "Calibrated density (n/m²)",
-    title = "Density estimate calibration"
+    title = "Density estimate calibration (YOLO)"
   ) +
   theme_minimal()
-save_cal(p = p_caldense, outdir = "../figures/", id = "2224_caldense", width = 7)
+save_cal(p = p_caldense, outdir = "../figures/", id = "2224_caldense_yolo", width = 7)
 
 p_corr = pred_calibrated %>%
   mutate(correction = p_detection - conf) %>%
@@ -365,7 +454,7 @@ p_corr = pred_calibrated %>%
     title = "Confidence correction (YOLO)"
   ) +
   theme_minimal()
-save_cal(p = p_corr, outdir = "../figures/", id = "2224_corr", width = 7)
+save_cal(p = p_corr, outdir = "../figures/", id = "2224_corr_yolo", width = 7)
 
 mean_p <- mean(pred_calibrated$p_detection, na.rm = TRUE)
 
@@ -402,7 +491,7 @@ p_pdist = ggplot(pred_calibrated, aes(x = p_detection)) +
     plot.title = element_text(face = "bold"),
     plot.subtitle = element_text(color = "grey30")
   )
-save_cal(p = p_pdist, outdir = "../figures/", id = "2224_dpist", width = 7)
+save_cal(p = p_pdist, outdir = "../figures/", id = "2224_dpist_yolo", width = 7)
 
 year_counts <- pred_lengths %>%
   group_by(year) %>%
@@ -437,11 +526,11 @@ p_lengthdist <- ggplot(pred_lengths, aes(x = length_mm, weight = p_detection)) +
   labs(
     x = "Estimated scallop length (mm)",
     y = "Expected number of individuals",
-    title = "Expected scallop size distribution by year"
+    title = "Expected scallop size distribution by year (YOLO)"
   ) +
   theme_minimal(base_size = 13)
-p_lengthdist
-save_cal(p = p_lengthdist, outdir = "../figures/", id = "2224_lengthdist", width = 11.5)
+# p_lengthdist
+save_cal(p = p_lengthdist, outdir = "../figures/", id = "2224_lengthdist_yolo", width = 11.5)
 
 #####
 # sample size = same length distribution ?
@@ -453,6 +542,7 @@ save_cal(p = p_lengthdist, outdir = "../figures/", id = "2224_lengthdist", width
 
 df_2024 <- pred_lengths %>%
   filter(year == 2024) %>%
+  filter(latitude > 40) %>%
   filter(!is.na(length_mm))
 
 # Calculate Q1, Q3, and IQR
@@ -515,7 +605,7 @@ results <- map_dfr(target_sums, function(target_p) {
   )
 })
 
-threshold <- 0.035  # 2.5% error
+threshold <- 0.035  # 3.5% error
 
 p_min <- results %>%
   filter(mean_error < threshold) %>%
@@ -532,7 +622,7 @@ p_lengthss = ggplot(results, aes(x = target_p, y = mean_error)) +
     alpha = 0.2,
     fill = "grey50"
   ) +
-  
+  xlim(c(0,13000)) +
   # threshold
   geom_hline(yintercept = threshold, linetype = "dashed", color = "red") +
   
@@ -569,9 +659,11 @@ p_lengthss = ggplot(results, aes(x = target_p, y = mean_error)) +
   labs(
     x = expression("Sample size (expected abundance, " * Sigma * "p[detection])"),
     y = "Distribution error",
-    title = "Convergence of scallop length distribution (2024)"
+    title = "Convergence of scallop length distribution (2024)",
+    subtitle = "Georges Banks"
   ) +
   theme_minimal(base_size = 14)
 p_lengthss
-save_cal(p = p_lengthss, id = "2224_lengthss", width = 10, height = 6, 
+
+save_cal(p = p_lengthss, id = "2224_lengthss_cas_GB", width = 10, height = 6, 
          outdir = "../figures/", format = "png")
