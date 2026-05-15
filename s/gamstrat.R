@@ -10,8 +10,8 @@ table(dat_split$is_test_gam_train)
 table(dat_split$is_test_gam_test)
 colnames(dat_split)
 
-model = Casv2strat2224
-model_name = deparse(substitute(Casv2strat2224))
+model = YOLOv12strat2224
+model_name = deparse(substitute(YOLOv12strat2224))
 
 # trains GAMs on is_test_gam_train (65% of detection test - stratified space x density)
 gams <- fit_calibration_gams(
@@ -25,7 +25,7 @@ summary(gams$GB); summary(gams$MAB)
 AIC(gams$GB); AIC(gams$MAB)
 
 # tests GAMs on is_test_gam_test (35% of detection test - stratified space x density)
-pred = run_model_pipeline(model, model_name, gams = gams, 
+pred = run_model_pipeline(model, model_name, gams = gams, test = TRUE,
                                dat_split = dat_split, use_strat = TRUE)
 
 # ---- Step 1: rename regions FIRST ----
@@ -71,7 +71,7 @@ p_zoomed <- plot_image_level_fit_zoom(
   model_name = model_name,
   zoom_q=1,
   plot_title = "True abundance vs. Σ calibrated detection probabilities per image",
-  model_label = expression("Dataset: 2022 - 2024, Detection Model: " * bold("Cascade R-CNN"))
+  model_label = expression("Dataset: 2022 - 2024, Detection Model: " * bold("YOLOv12"))
 )
 p_zoomed
 
@@ -81,14 +81,14 @@ p_resid = pred$img %>%
   geom_point(alpha = 0.5) +
   geom_hline(yintercept = 0, linetype = "dashed") +
   labs(title = "Residuals vs True Count",
-       subtitle = "Cascade R-CNN")
-
+       subtitle = "YOLOv12")
+p_resid
 # strong, but how to visualize after calibration?
 p_fn = ggplot(pred$img, aes(true_number, false_negative)) +
   geom_point(alpha = 0.5) +
   geom_smooth() +
   labs(title = "False negatives vs true abundance")
-
+p_fn
 # for each break of p(detection), what is the average true positive count?
 pred$calib_df %>%
   mutate(bin = cut(pred_p, breaks = seq(0,1,0.1))) %>%
@@ -128,7 +128,7 @@ p_sum = ggplot(summary_df, aes(x = metric, y = value, fill = metric)) +
   theme_minimal() +
   labs(
     title = "Total scallop abundance",
-    subtitle = "Cascade R-CNN",
+    subtitle = "YOLOv12",
     x = "",
     y = "Total count"
   ) +

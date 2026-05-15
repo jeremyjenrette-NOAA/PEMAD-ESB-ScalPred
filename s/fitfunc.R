@@ -40,8 +40,8 @@ fit_calibration_gams <- function(model, model_name, dat_split, use_strat = FALSE
     m_gb <- mgcv::gam(
       y ~ s(conf, bottom_depth, k = 5) +
         # s(conf, boxsize, k = 7) +
-        s(latitude, longitude, k = 7), 
-        # s(altitude, backscatter, k = 7),
+        s(latitude, longitude, k = 7) + 
+        s(altitude, backscatter, k = 7),
       family = binomial(),
       data = gb_calib,
       method = "REML"
@@ -50,8 +50,8 @@ fit_calibration_gams <- function(model, model_name, dat_split, use_strat = FALSE
     m_mab <- mgcv::gam(
       y ~ s(conf, bottom_depth, k = 5) +
         # s(conf, boxsize, k = 7) +
-        s(latitude, longitude, k = 7), 
-        # s(altitude, backscatter, k = 7),
+        s(latitude, longitude, k = 7) + 
+        s(altitude, backscatter, k = 7),
       family = binomial(),
       data = mab_calib,
       method = "REML"
@@ -177,7 +177,7 @@ fitimage_calibration_mod <- function(model, model_name, p_detect) {
 }
 
 
-run_model_pipeline <- function(model, model_name, gams, 
+run_model_pipeline <- function(model, model_name, gams, test = TRUE,
                                use_strat = FALSE, dat_split = NULL) {
   
   # gams <- fit_calibration_gams(
@@ -221,6 +221,7 @@ run_model_pipeline <- function(model, model_name, gams,
     model_name = model_name,
     f1_thresh = f1conf_gb,
     dat_split = dat_split_gb,
+    use_is_test_gam_test = test,
     use_strat = use_strat
   )
   
@@ -231,6 +232,7 @@ run_model_pipeline <- function(model, model_name, gams,
     model_name = model_name,
     f1_thresh = f1conf_mab,
     dat_split = dat_split_mab,
+    use_is_test_gam_test = test,
     use_strat = use_strat
   )
   
@@ -251,9 +253,9 @@ attach_metadata_to_images <- function(img_df, meta_df) {
   library(stringr)
   
   # 1. Standardize column names to lowercase
-  meta_df <- meta_df %>%
-    rename_with(tolower) %>%
-    mutate(image_id = std_image_id(imagename))
+  # meta_df <- meta_df %>%
+  #   rename_with(tolower) %>%
+  #   mutate(image_id = std_image_id(imagename))
   
   # 3. Ensure img_df also has lowercase names (safe)
   img_df <- img_df %>%
@@ -261,7 +263,7 @@ attach_metadata_to_images <- function(img_df, meta_df) {
   
   # 4. Select only desired metadata columns (if they exist)
   keep_cols <- c(
-    "image_id",
+    "imagename",
     "latitude",
     "longitude",
     "bottom_depth",
@@ -285,7 +287,7 @@ attach_metadata_to_images <- function(img_df, meta_df) {
   
   # 5. Join
   out <- img_df %>%
-    left_join(meta_selected, by = "image_id")
+    left_join(meta_selected, by = "imagename")
   
   return(out)
 }

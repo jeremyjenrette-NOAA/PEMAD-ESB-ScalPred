@@ -1,3 +1,9 @@
+library(dplyr)
+library(ggplot2)
+library(forcats)
+library(scales)
+source("./gamfunc.R")
+
 dat_split = read.csv("../data/raw/dataset_split_2224.csv")
 
 dat_split <- dat_split %>%
@@ -39,66 +45,160 @@ dat_split <- dat_split %>%
 dat_split <- dat_split %>%
   mutate(density = n_annotations / field_of_view_sq_meter)
 
-world <- map_data("world")
-
 dat_plot <- dat_split %>%
   mutate(
-    density = n_annotations / field_of_view_sq_meter,
     split_stage = case_when(
-      is_train == "True" | is_train == TRUE ~ "YOLO train (70%)",
-      is_test_gam_train == "True" | is_test_gam_train == TRUE ~ "GAM train (65% of test)",
-      is_test_gam_test == "True" | is_test_gam_test == TRUE ~ "GAM test (35% of test)",
+      is_train == "True" | is_train == TRUE ~ "YOLO train",
+      is_test_gam_train == "True" | is_test_gam_train == TRUE ~ "GAM train",
+      is_test_gam_test == "True" | is_test_gam_test == TRUE ~ "GAM test",
       TRUE ~ "Other"
-    )
+    ),
+    density = n_annotations / field_of_view_sq_meter,
+    density_class = case_when(
+      n_annotations == 0 ~ "0 scallops",
+      n_annotations == 1 ~ "1 scallop",
+      n_annotations == 2 ~ "2 scallops",
+      n_annotations > 2 ~ ">2 scallops",
+      TRUE ~ NA_character_
+    ),
+    block_pos = transect_position %% 10,
+    transect_group = as.factor(transect_group),
+    transect_block_id = as.factor(transect_block_id)
   ) %>%
-  filter(
-    !is.na(latitude),
-    !is.na(longitude),
-    !is.na(density)
+  filter(!is.na(transect_group), !is.na(transect_position))
+
+p_blocks <- ggplot(
+  dat_plot,
+  aes(
+    x = transect_position,
+    y = fct_reorder(transect_group, as.numeric(transect_group)),
+    fill = split_stage
+  )
+) +
+  geom_tile(
+    aes(alpha = pmin(n_annotations, 20)),
+    height = 0.8,
+    width = 0.95
+  ) +
+  scale_alpha_continuous(
+    name = "Manual annotations\n(capped at 20)",
+    range = c(0.35, 1)
+  ) +
+  scale_fill_manual(
+    values = c(
+      "YOLO train" = "#4D4D4D",
+      "GAM train"  = "#2C7FB8",
+      "GAM test"   = "#D95F0E",
+      "Other"      = "grey80"
+    )
+  ) +
+  labs(
+    title = "Transect-block stratification of annotated HabCam images",
+    subtitle = "Each tile is one image ordered along an inferred transect; color indicates dataset split and opacity indicates annotation density",
+    x = "Ordered image position within transect",
+    y = "Transect",
+    fill = "Dataset split"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.y = element_text(size = 7),
+    legend.position = "right"
   )
 
-spatial_summary <- dat_plot %>%
-  group_by(stratum, split_stage) %>%
-  summarise(
-    lon = mean(longitude, na.rm = TRUE),
-    lat = mean(latitude, na.rm = TRUE),
-    mean_density = mean(density, na.rm = TRUE),
-    n_images = n(),
-    .groups = "drop"
-  )
+p_blocks
 
-p_strat = ggplot() +
+world <- map_data("world")
+
+p_map_split <- ggplot() +
   geom_polygon(
     data = world,
     aes(x = long, y = lat, group = group),
     fill = "grey95",
-    color = "grey75",
+    color = "grey80",
     linewidth = 0.2
   ) +
-  geom_point(
-    data = spatial_summary,
+  geom_path(
+    data = dat_plot %>% arrange(transect_group, transect_position),
     aes(
-      x = lon,
-      y = lat,
-      size = mean_density,
-      color = split_stage
+      x = longitude,
+      y = latitude,
+      group = transect_group
     ),
-    alpha = 0.8
+    color = "grey60",
+    linewidth = 0.25,
+    alpha = 0.45
+  ) +
+  geom_point(
+    data = dat_plot,
+    aes(
+      x = longitude,
+      y = latitude,
+      color = split_stage,
+      size = pmin(n_annotations, 20)
+    ),
+    alpha = 0.75
   ) +
   coord_quickmap(
-    xlim = range(dat_plot$longitude, na.rm = TRUE) + c(-0.5, 0.5),
-    ylim = range(dat_plot$latitude, na.rm = TRUE) + c(-0.5, 0.5)
+    xlim = range(dat_plot$longitude, na.rm = TRUE) + c(-0.4, 0.4),
+    ylim = range(dat_plot$latitude, na.rm = TRUE) + c(-0.4, 0.4)
   ) +
-  scale_size_continuous(name = "Mean density\n(n/m²)") +
+  scale_size_continuous(
+    name = "Manual annotations\n(capped at 20)",
+    range = c(0.4, 3.2)
+  ) +
+  scale_color_manual(
+    values = c(
+      "YOLO train" = "#4D4D4D",
+      "GAM train"  = "#2C7FB8",
+      "GAM test"   = "#D95F0E",
+      "Other"      = "grey80"
+    )
+  ) +
   labs(
-    title = "Spatial distribution of stratified scallop image splits",
+    title = "Spatial distribution of transect-block stratified image splits",
+    subtitle = "Grey lines represent inferred transects; point size reflects manual scallop annotation density",
     x = "Longitude",
     y = "Latitude",
     color = "Dataset split"
   ) +
-  theme_minimal()
+  theme_minimal(base_size = 13)
 
-save_cal(p_strat, id = paste0("2224_spatial_strat"), format = "jpg", 
+p_map_split
+
+p_density <- ggplot(
+  dat_plot,
+  aes(x = split_stage, y = n_annotations, fill = split_stage)
+) +
+  geom_violin(alpha = 0.7, trim = TRUE) +
+  geom_boxplot(width = 0.12, outlier.alpha = 0.15) +
+  scale_y_continuous(
+    trans = "pseudo_log",
+    breaks = c(0, 1, 2, 5, 10, 25, 50, 100, 250)
+  ) +
+  scale_fill_manual(
+    values = c(
+      "YOLO train" = "#4D4D4D",
+      "GAM train"  = "#2C7FB8",
+      "GAM test"   = "#D95F0E",
+      "Other"      = "grey80"
+    )
+  ) +
+  labs(
+    title = "Manual annotation density across dataset splits",
+    x = "",
+    y = "Manual scallop annotations per image",
+    fill = "Dataset split"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none")
+
+p_density
+
+save_cal(p_map_split, id = paste0("2224_spatial_strat"), format = "jpg", 
          outdir = "../figures/diag2/", width = 8, height = 6)
-
+save_cal(p_blocks, id = paste0("2224_spatial_strat_grid"), format = "jpg", 
+         outdir = "../figures/diag2/", width = 11.75, height = 6)
+save_cal(p_density, id = paste0("2224_spatial_strat_density"), format = "jpg", 
+         outdir = "../figures/diag2/", width = 8, height = 6)
 

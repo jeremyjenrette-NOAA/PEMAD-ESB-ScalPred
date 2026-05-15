@@ -135,6 +135,7 @@ compute_image_level_counts <- function(calib_df,
                                        f1_thresh,
                                        use_strat = FALSE,
                                        dat_split,
+                                       use_is_test_gam_test = TRUE,
                                        conf_col = "conf") {
   
   library(dplyr)
@@ -147,9 +148,14 @@ compute_image_level_counts <- function(calib_df,
     mutate(imagename = basename(imagename))
   
   # --- define image set ---
-  if (use_strat) {
+  if (use_strat & use_is_test_gam_test) {
     test_images <- dat_split %>%
       filter(tolower(is_test_gam_test) == "true") %>%
+      pull(imagename) %>%
+      unique()
+  } else if (use_strat & !use_is_test_gam_test) {
+    test_images <- dat_split %>%
+      filter(tolower(is_test_gam_train) == "true") %>%
       pull(imagename) %>%
       unique()
   } else {

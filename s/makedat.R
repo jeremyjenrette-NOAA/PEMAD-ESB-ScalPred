@@ -3,28 +3,28 @@ library(purrr)
 library(tibble)
 source("./datfunc.R")
 
-at_cas <- read.csv("../data/raw/2224scallop_viame_370248/autotest2224_viame_cascade.csv") %>%
+at_cas <- read.csv("../data/raw/2224scallop_viame_408180/eval/autotest2224_viame_cascade.csv") %>%
   mutate(truedetect = if_else(truedetect == "True", TRUE, FALSE)) %>%
   rename(spname = Spname) %>%
   rename(imagename = Imagename)
 
-mt_cas <- read.csv("../data/raw/2224scallop_viame_370248/mantest2224_viame_cascade.csv") %>%
+mt_cas <- read.csv("../data/raw/2224scallop_viame_408180/eval/mantest2224_viame_cascade.csv") %>%
   rename(spname = Spname) %>%
   rename(imagename = Imagename)
 
 #============================================================#
 # read data
 #============================================================#
-at <- read.csv("../data/raw/2224scallop_yolo12n_370283/eval/autotest2224_yolo12n.csv") %>%
+at <- read.csv("../data/raw/2224scallop_yolo12n_408179/eval/autotest2224_yolo12n.csv") %>%
   mutate(truedetect = if_else(truedetect == "True", TRUE, FALSE))
-mt <- read.csv("../data/raw/2224scallop_yolo12n_370283/eval/mantest2224_yolo12n.csv")
+mt <- read.csv("../data/raw/2224scallop_yolo12n_408179/eval/mantest2224_yolo12n.csv")
 # meta = read.csv("../data/processed/metadata2224.csv")
 
-all_test_imgs = read.csv("../data/raw/2224scallop_yolo12n_370283/eval/val_images2224_yolo12n.csv") 
+all_test_imgs = read.csv("../data/raw/2224scallop_yolo12n_408179/eval/val_images2224_yolo12n.csv") 
 
-out <- build_detection_tables(mt = mt_cas, at = at_cas, meta = meta_std, all_test_imgs = all_test_imgs)
+out <- build_detection_tables(mt = mt, at = at, meta = dat_split, all_test_imgs = all_test_imgs)
 
-model_name <- "Casv2strat2224"
+model_name <- "YOLOv12strat2224"
 
 res <- structure_by_region(out, model_name, 
                            region_lat_cutoff = 40, 
