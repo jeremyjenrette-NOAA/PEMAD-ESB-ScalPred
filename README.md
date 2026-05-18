@@ -198,17 +198,16 @@ The pipeline follows a structured, end-to-end workflow:
 **Model**
 * stratified by *region* and *detection model*
 
-
 $$
-\text{True Positive} =
+P(\text{Scallop}_i)  =
 f_1(\mathrm{conf}_i,\mathrm{bottomDepth}_i) +
 f_2(\mathrm{altitude}_i,\mathrm{backscatter}_i) +
 f_3(\mathrm{latitude}_i,\mathrm{longitude}_i)
 $$
 
 $$
-\text{True Count} = \text{region} +
-f(\mathrm{Cascade_pred}_i,\mathrm{Cascade - YOLO}_i)
+P(\text{TotalCount}_i) = \text{region} +
+f[\mathrm{Cascade}_i,\mathrm{(Cascade - YOLO)}_i]
 $$
 
 <img src="figures/diag2/2224yolov12cas_gammod.png" width="400"> <img src="figures/diag2/2224total_error.png" width="400">
