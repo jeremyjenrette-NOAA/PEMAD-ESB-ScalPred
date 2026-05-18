@@ -203,7 +203,7 @@ The pipeline follows a structured, end-to-end workflow:
 * `fitfunc.R` → detection-level GAMs by region
 * `gammod.R` → image-level GAM
 
-**Model**
+**Modeling**
 * stratified by *region* and *detection model*
 
 $$
@@ -219,11 +219,11 @@ f[\mathrm{Cascade}_i,\mathrm{(Cascade - YOLO)}_i]
 $$
 
 <div style="text-align: center;">
-    <img src="figures/diag2/2224yolov12cas_gammod.png" width="750">
+    <img src="figures/diag2/2224yolov12cas_gammod.png" width="550">
 </div>
 
 <div style="text-align: center;">
-    <img src="figures/diag2/2224total_error.png" width="750">
+    <img src="figures/diag2/2224total_error.png" width="550">
 </div>
 
 
