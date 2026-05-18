@@ -185,12 +185,16 @@ The pipeline follows a structured, end-to-end workflow:
   * Detection uncertainty (confidence scores)
 * Produces **probabilistic detection estimates** (p(detection))
 
-![Stratification](figures/diag2/2224_spatial_strat_grid.jpg)
-
 **Scripts**
 
 * `strat_vis.R` → training data stratitifcation visualization
+
+<img src="figures/diag2/2224_spatial_strat_grid.jpg" width="500"> 
+
 * `gamstrat.R` → data loading and metric visualization
+
+<img src="figures/diag2/2224_YOLOv12strat2224_count_strat.png" width="500"> 
+
 * `gamfunc.R` → prediction and plotting functions
 * `fitfunc.R` → detection-level GAMs by region
 * `gammod.R` → image-level GAM
@@ -206,11 +210,12 @@ f_3(\mathrm{latitude}_i,\mathrm{longitude}_i)
 $$
 
 $$
-P(\text{TotalCount}_i) = \text{region} +
+P(\text{TotalCount}_i) = \text{region}_i +
 f[\mathrm{Cascade}_i,\mathrm{(Cascade - YOLO)}_i]
 $$
 
-<img src="figures/diag2/2224yolov12cas_gammod.png" width="400"> <img src="figures/diag2/2224total_error.png" width="400">
+<img src="figures/diag2/2224yolov12cas_gammod.png" width="400"> 
+<img src="figures/diag2/2224total_error.png" width="550">
 
 
 **Outputs**
