@@ -111,8 +111,7 @@ PEMAD-ESB-ScalPred provides:
 
 The pipeline follows a structured, end-to-end workflow:
 
-![How does it work?](figures/diag2/stratified.png){width=300px height=600px}
-
+<img src="figures/diag2/stratified.png" width="790"> 
 ---
 
 ### 1. Data Ingestion and Preparation
@@ -207,9 +206,13 @@ f_2(\mathrm{altitude}_i,\mathrm{backscatter}_i) +
 f_3(\mathrm{latitude}_i,\mathrm{longitude}_i)
 $$
 
+$$
+\text{True Count} = \text{region} +
+f(\mathrm{Cascade_pred}_i,\mathrm{Cascade - YOLO}_i)
+$$
 
-<img src="figures/diag2/2224yolov12cas_gammod.png" width="200">
-<img src="figures/diag2/2224total_error.png" width="200">
+<img src="figures/diag2/2224yolov12cas_gammod.png" width="400"> <img src="figures/diag2/2224total_error.png" width="400">
+
 
 **Outputs**
 
