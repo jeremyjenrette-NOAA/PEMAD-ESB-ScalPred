@@ -48,7 +48,7 @@ dat_split <- dat_split %>%
 dat_plot <- dat_split %>%
   mutate(
     split_stage = case_when(
-      is_train == "True" | is_train == TRUE ~ "YOLO train",
+      is_train == "True" | is_train == TRUE ~ "Detection train",
       is_test_gam_train == "True" | is_test_gam_train == TRUE ~ "GAM train",
       is_test_gam_test == "True" | is_test_gam_test == TRUE ~ "GAM test",
       TRUE ~ "Other"
@@ -76,17 +76,17 @@ p_blocks <- ggplot(
   )
 ) +
   geom_tile(
-    aes(alpha = pmin(n_annotations, 20)),
+    aes(alpha = pmin(n_annotations, 15)),
     height = 0.8,
     width = 0.95
   ) +
   scale_alpha_continuous(
-    name = "Manual annotations\n(capped at 20)",
-    range = c(0.35, 1)
+    name = "Manual annotations\n(max = 15+)",
+    range = c(0.4, 1)
   ) +
   scale_fill_manual(
     values = c(
-      "YOLO train" = "#4D4D4D",
+      "Detection train" = "black",
       "GAM train"  = "#2C7FB8",
       "GAM test"   = "#D95F0E",
       "Other"      = "grey80"
@@ -94,8 +94,8 @@ p_blocks <- ggplot(
   ) +
   labs(
     title = "Transect-block stratification of annotated HabCam images",
-    subtitle = "Each tile is one image ordered along an inferred transect; color indicates dataset split and opacity indicates annotation density",
-    x = "Ordered image position within transect",
+    subtitle = "1 out of every 50 images annotated",
+    x = "Image position within transect",
     y = "Transect",
     fill = "Dataset split"
   ) +
@@ -135,7 +135,7 @@ p_map_split <- ggplot() +
       x = longitude,
       y = latitude,
       color = split_stage,
-      size = pmin(n_annotations, 20)
+      size = pmin(n_annotations, 15)
     ),
     alpha = 0.75
   ) +
@@ -144,12 +144,12 @@ p_map_split <- ggplot() +
     ylim = range(dat_plot$latitude, na.rm = TRUE) + c(-0.4, 0.4)
   ) +
   scale_size_continuous(
-    name = "Manual annotations\n(capped at 20)",
+    name = "Manual annotations\n(max = 15+)",
     range = c(0.4, 3.2)
   ) +
   scale_color_manual(
     values = c(
-      "YOLO train" = "#4D4D4D",
+      "Detection train" = "black",
       "GAM train"  = "#2C7FB8",
       "GAM test"   = "#D95F0E",
       "Other"      = "grey80"
@@ -157,7 +157,7 @@ p_map_split <- ggplot() +
   ) +
   labs(
     title = "Spatial distribution of transect-block stratified image splits",
-    subtitle = "Grey lines represent inferred transects; point size reflects manual scallop annotation density",
+    subtitle = "Grey lines represent transects; point size reflects manual scallop annotation density",
     x = "Longitude",
     y = "Latitude",
     color = "Dataset split"
@@ -178,7 +178,7 @@ p_density <- ggplot(
   ) +
   scale_fill_manual(
     values = c(
-      "YOLO train" = "#4D4D4D",
+      "Detection train" = "#4D4D4D",
       "GAM train"  = "#2C7FB8",
       "GAM test"   = "#D95F0E",
       "Other"      = "grey80"

@@ -92,7 +92,8 @@ PEMAD-ESB-ScalPred provides:
 │   ├── datfunc.R
 │   ├── fitfunc.R
 │   ├── gammod.R
-│   ├── gamcal.R
+│   ├── gamstrat.R
+│   ├── strat_vis.R
 │   ├── performance.R
 │   └── procfunc.R
 │
@@ -109,6 +110,8 @@ PEMAD-ESB-ScalPred provides:
 ## Workflow
 
 The pipeline follows a structured, end-to-end workflow:
+
+![How does it work?](figures/diag2/stratified.png)
 
 ---
 
@@ -183,12 +186,15 @@ The pipeline follows a structured, end-to-end workflow:
   * Detection uncertainty (confidence scores)
 * Produces **probabilistic detection estimates** (p(detection))
 
+![Stratification](figures/diag2/2224_spatial_strat_grid.jpg)
+
 **Scripts**
 
-* `gamcal.R` → data loading and metric visualization
+* `strat_vis.R` → training data stratitifcation visualization
+* `gamstrat.R` → data loading and metric visualization
 * `gamfunc.R` → prediction and plotting functions
 * `fitfunc.R` → detection-level GAMs by region
-    - image-level GAM deprecated, see `gammod.R` for latest
+* `gammod.R` → image-level GAM
 
 **Model**
 * stratified by *region* and *detection model*
@@ -200,6 +206,8 @@ f_1(\mathrm{conf}_i,\mathrm{bottomDepth}_i) +
 f_2(\mathrm{altitude}_i,\mathrm{backscatter}_i) +
 f_3(\mathrm{latitude}_i,\mathrm{longitude}_i)
 $$
+
+![Alt 1](figures/diag2/2224yolov12cas_gammod.png) ![Alt 2](figures/diag2/2224total_error.png)
 
 **Outputs**
 

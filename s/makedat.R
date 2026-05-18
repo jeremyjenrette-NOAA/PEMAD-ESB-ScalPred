@@ -2,7 +2,10 @@ library(dplyr)
 library(purrr)
 library(tibble)
 source("./datfunc.R")
-
+# read data
+#============================================================#
+# Cascade R-CNN 
+#============================================================#
 at_cas <- read.csv("../data/raw/2224scallop_viame_408180/eval/autotest2224_viame_cascade.csv") %>%
   mutate(truedetect = if_else(truedetect == "True", TRUE, FALSE)) %>%
   rename(spname = Spname) %>%
@@ -13,27 +16,18 @@ mt_cas <- read.csv("../data/raw/2224scallop_viame_408180/eval/mantest2224_viame_
   rename(imagename = Imagename)
 
 #============================================================#
-# read data
+# YOLO
 #============================================================#
 at <- read.csv("../data/raw/2224scallop_yolo12n_408179/eval/autotest2224_yolo12n.csv") %>%
   mutate(truedetect = if_else(truedetect == "True", TRUE, FALSE))
 mt <- read.csv("../data/raw/2224scallop_yolo12n_408179/eval/mantest2224_yolo12n.csv")
 # meta = read.csv("../data/processed/metadata2224.csv")
 
+# read all tested images (not just detections)
+# same for Cascade and YOLO
 all_test_imgs = read.csv("../data/raw/2224scallop_yolo12n_408179/eval/val_images2224_yolo12n.csv") 
 
-out <- build_detection_tables(mt = mt, at = at, meta = dat_split, all_test_imgs = all_test_imgs)
-
-model_name <- "YOLOv12strat2224"
-
-res <- structure_by_region(out, model_name, 
-                           region_lat_cutoff = 40, 
-                           save_rdata = TRUE)
-
-names(res)
-
-
-####
+# read master stratify dataframe + metadata
 dat_split = read.csv("../data/raw/dataset_split_2224.csv")
 
 dat_split <- dat_split %>%
@@ -73,4 +67,14 @@ dat_split <- dat_split %>%
   distinct(imagename, .keep_all = TRUE)
 
 
+
+out <- build_detection_tables(mt = mt, at = at, meta = dat_split, all_test_imgs = all_test_imgs)
+
+model_name <- "YOLOv12strat2224"
+
+res <- structure_by_region(out, model_name, 
+                           region_lat_cutoff = 40, 
+                           save_rdata = TRUE)
+
+names(res)
 

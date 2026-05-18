@@ -301,13 +301,14 @@ gammod
 true_total <- sum(df_eval$true, na.rm = TRUE)
 
 summary_df <- data.frame(
-  metric = c("True", "Cascade R-CNN", "YOLOv12", "s(YOLOv12 - Cascade)", "YOLOv12 F1"),
+  metric = c("True", "Cascade R-CNN", "YOLOv12", "s(YOLOv12 - Cascade)", "YOLOv12 F1", "Cascade R-CNN F1"),
   value  = c(
     true_total,
     sum(img_cas_test$calib_df$pred_p, na.rm = TRUE),
     sum(img_yolo_test$calib_df$pred_p, na.rm = TRUE),
     sum(df_eval$pred, na.rm = TRUE),
-    sum(img_yolo_test$img$predicted_f1_number, na.rm = TRUE)
+    sum(img_yolo_test$img$predicted_f1_number, na.rm = TRUE),
+    sum(img_cas_test$img$predicted_f1_number, na.rm = TRUE)
   )
 ) %>%
   mutate(

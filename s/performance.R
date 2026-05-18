@@ -1,12 +1,12 @@
 #============================================================#
-load("../data/processed/Casv2strat2224.RData")
-load("../data/processed/YOLOv12strat2224.RData")
+load("../data/processed/Cas2224.RData")
+load("../data/processed/YOLOv122224.RData")
 #============================================================#
 # Analysis: Precision-Recall
 #============================================================#
 library(tidyverse)
 source("./procfunc.R")
-out_pr <- evaluate_pr_models(list(YOLOv12strat2224, Casv2strat2224), 
+out_pr <- evaluate_pr_models(list(YOLOv122224, Cas2224), 
                              stratify_region = TRUE)
 
 
