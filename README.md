@@ -111,7 +111,7 @@ PEMAD-ESB-ScalPred provides:
 
 The pipeline follows a structured, end-to-end workflow:
 
-<img src="figures/diag2/stratified.png" width="790"> 
+<img src="figures/diag2/stratified.png" width="700"> 
 ---
 
 ### 1. Data Ingestion and Preparation
@@ -189,11 +189,15 @@ The pipeline follows a structured, end-to-end workflow:
 
 * `strat_vis.R` → training data stratitifcation visualization
 
-<img src="figures/diag2/2224_spatial_strat_grid.jpg" width="500"> 
+<div style="text-align: center;">
+    <img src="figures/diag2/2224_spatial_strat_grid.jpg" width="750">
+</div>
 
 * `gamstrat.R` → data loading and metric visualization
 
-<img src="figures/diag2/2224_YOLOv12strat2224_count_strat.png" width="500"> 
+<div style="text-align: center;">
+    <img src="figures/diag2/2224_YOLOv12strat2224_count_strat.png" width="750">
+</div>
 
 * `gamfunc.R` → prediction and plotting functions
 * `fitfunc.R` → detection-level GAMs by region
@@ -214,8 +218,13 @@ P(\text{TotalCount}_i) = \text{region}_i +
 f[\mathrm{Cascade}_i,\mathrm{(Cascade - YOLO)}_i]
 $$
 
-<img src="figures/diag2/2224yolov12cas_gammod.png" width="400"> 
-<img src="figures/diag2/2224total_error.png" width="550">
+<div style="text-align: center;">
+    <img src="figures/diag2/2224yolov12cas_gammod.png" width="750">
+</div>
+
+<div style="text-align: center;">
+    <img src="figures/diag2/2224total_error.png" width="750">
+</div>
 
 
 **Outputs**
