@@ -199,7 +199,7 @@ The pipeline follows a structured, end-to-end workflow:
 **Model**
 * stratified by *region* and *detection model*
 
-`detection-level GAM`
+
 $$
 \text{True Positive} =
 f_1(\mathrm{conf}_i,\mathrm{bottomDepth}_i) +
@@ -207,12 +207,9 @@ f_2(\mathrm{altitude}_i,\mathrm{backscatter}_i) +
 f_3(\mathrm{latitude}_i,\mathrm{longitude}_i)
 $$
 
-`image-level GAM`
-$$
-\text{True Count} = \text{region} +
-f(\mathrm{Cascade_pred}_i,\mathrm{Cascade - YOLO}_i)
-$$
-![Alt 1](figures/diag2/2224yolov12cas_gammod.png){width=200px height=100px} ![Alt 2](figures/diag2/2224total_error.png)
+
+<img src="figures/diag2/2224yolov12cas_gammod.png" width="200">
+<img src="figures/diag2/2224total_error.png" width="200">
 
 **Outputs**
 
