@@ -50,7 +50,7 @@ evaluate_pr_curve <- function(
 evaluate_pr_models <- function(
     res_list,                         # one res OR list of res
     conf_grid = seq(0, 1, by = 0.0005),
-    title = "Precision–Recall Curves",
+    title = "Precision–Recall",
     stratify_region = TRUE,           # NEW: if FALSE, pool GB+MAB into one PR curve per model
     pooled_label = ""             # NEW: suffix for pooled model_id
 ) {
@@ -105,7 +105,20 @@ evaluate_pr_models <- function(
         model_id  = paste0(model_base, "_MAB")
       )
       
-      return(dplyr::bind_rows(pr_gb, pr_mab))
+      pr_em = dplyr::bind_rows(pr_gb, pr_mab)
+      
+      pr_em <- pr_em %>%
+        mutate(
+          model = case_when(
+            model == "Cas2224_GB"      ~ "Cascade R-CNN GB",
+            model == "Cas2224_MAB"     ~ "Cascade R-CNN MAB",
+            model == "YOLOv122224_GB"  ~ "YOLOv12 GB",
+            model == "YOLOv122224_MAB" ~ "YOLOv12 MAB",
+            TRUE ~ model # This keeps any other values exactly as they are
+          )
+        )
+      
+      return(pr_em)
     }
     
     # pooled across regions
@@ -122,7 +135,7 @@ evaluate_pr_models <- function(
     pr_all_model
   })
   
-  legend_title <- if (isTRUE(stratify_region)) "Mdl_Region" else "Model"
+  legend_title <- if (isTRUE(stratify_region)) "Model by region" else "Model"
   
   p_pr <- ggplot2::ggplot(pr_all, ggplot2::aes(x = recall, y = precision, color = model)) +
     ggplot2::geom_path(linewidth = 1.2, na.rm = TRUE) +

@@ -9,9 +9,9 @@ source("./procfunc.R")
 out_pr <- evaluate_pr_models(list(YOLOv122224, Cas2224), 
                              stratify_region = TRUE)
 
-
 pr_all <- out_pr$pr_all
 p_pr   <- out_pr$p_pr
+
 p_pr
 #============================================================#
 # Analysis: F1 score
@@ -25,36 +25,43 @@ best_pts <- pr_all %>%
 
 p_f1 <- ggplot(pr_all, aes(x = conf, y = f1, color = model)) +
   geom_line(linewidth = 1.2) +
-  
-  # X marks the spot
-  geom_point(
-    data = best_pts,
-    aes(x = conf, y = f1),
-    shape = 4,        # X
-    size = 4,
-    stroke = 1.2
-  ) +
-  
-  # Text annotation
-  geom_text(
-    data = best_pts[4,],
-    aes(
-      label = sprintf("F1 = %.3f, conf = %.2f", f1, conf)
-    ),
-    hjust = 1,
-    vjust = -1,
-    size = 3.5,
-    show.legend = FALSE
-  ) +
+  # 
+  # # X marks the spot
+  # geom_point(
+  #   data = best_pts,
+  #   aes(x = conf, y = f1),
+  #   shape = 4,        # X
+  #   size = 4,
+  #   stroke = 1.2
+  # ) +
+  # 
+  # # Text annotation
+  # geom_text(
+  #   data = best_pts[4,],
+  #   aes(
+  #     label = sprintf("F1 = %.3f, conf = %.2f", f1, conf)
+  #   ),
+  #   hjust = 1,
+  #   vjust = -1,
+  #   size = 3.5,
+  #   show.legend = FALSE
+  # ) +
   
   theme_minimal() +
   labs(
     title = "F1 Score vs Confidence Threshold",
     x = "Confidence threshold",
     y = "F1 score",
-    color = "Model"
+    color = "Model by region"
   )
 
 p_f1
 
-save_pr_f1(p_pr, p_f1, id = "2224yolov12_cas_strat", outdir = "../figures/diag2/", width = 7)
+combined_prf1_figure <- (p_pr | (p_f1 + theme(legend.position = "none"))) + 
+  plot_layout(heights = c(1, 1), guides = "collect") +
+  plot_annotation(tag_levels = 'A')
+
+save_pr_f1(p_pr, p_f1, id = "2224yolov12_cas", outdir = "../figures/diag2/", width = 7)
+
+save_cal(combined_prf1_figure, id = "2224yolov12_cas", outdir = "../figures/ms_figures/", 
+         width = 13, height = 7, format = "pdf")

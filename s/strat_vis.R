@@ -2,6 +2,7 @@ library(dplyr)
 library(ggplot2)
 library(forcats)
 library(scales)
+library(patchwork)
 source("./gamfunc.R")
 
 dat_split = read.csv("../data/raw/dataset_split_2224.csv")
@@ -114,8 +115,8 @@ p_map_split <- ggplot() +
   geom_polygon(
     data = world,
     aes(x = long, y = lat, group = group),
-    fill = "grey95",
-    color = "grey80",
+    fill = "grey55",
+    color = "grey40",
     linewidth = 0.2
   ) +
   geom_path(
@@ -156,8 +157,8 @@ p_map_split <- ggplot() +
     )
   ) +
   labs(
-    title = "Spatial distribution of transect-block stratified image splits",
-    subtitle = "Grey lines represent transects; point size reflects manual scallop annotation density",
+    title = "Georges Banks and Mid-Atlantic Bight",
+    # subtitle = "Grey lines represent transects",
     x = "Longitude",
     y = "Latitude",
     color = "Dataset split"
@@ -185,15 +186,22 @@ p_density <- ggplot(
     )
   ) +
   labs(
-    title = "Manual annotation density across dataset splits",
+    title = "Scallop density across datasets",
     x = "",
-    y = "Manual scallop annotations per image",
+    y = "Scallop annotations per image",
     fill = "Dataset split"
   ) +
   theme_minimal(base_size = 13) +
   theme(legend.position = "none")
 
 p_density
+
+combined_figure <- (p_blocks / (p_density | p_map_split)) + 
+  plot_layout(heights = c(1,1), ) +
+  plot_annotation(tag_levels = 'A')
+
+# Optional: Save the figure with ggsave
+# ggsave("combined_figure.png", combined_figure, width = 12, height = 10, bg = "white")
 
 save_cal(p_map_split, id = paste0("2224_spatial_strat"), format = "jpg", 
          outdir = "../figures/diag2/", width = 8, height = 6)
@@ -202,3 +210,6 @@ save_cal(p_blocks, id = paste0("2224_spatial_strat_grid"), format = "jpg",
 save_cal(p_density, id = paste0("2224_spatial_strat_density"), format = "jpg", 
          outdir = "../figures/diag2/", width = 8, height = 6)
 
+save_cal(combined_figure, id = paste0("2224_spatial_strat_comb"), format = "pdf", 
+         outdir = "../figures/ms_figures/", width = 13.5, height = 12.5)
+  
