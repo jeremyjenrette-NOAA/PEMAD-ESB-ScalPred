@@ -3,58 +3,40 @@ library(ggplot2)
 library(forcats)
 library(scales)
 library(patchwork)
+library(maps) # Explicitly loaded for map_data("world")
 source("./gamfunc.R")
 
-dat_split = read.csv("../data/raw/dataset_split_2224.csv")
+# Load the newly formatted dataset
+dat_split <- read.csv("../data/raw/dataset_split_2226.csv")
 
-dat_split <- dat_split %>%
-  rename(
-    # Imagename              = imagename,
-    altitude               = ALTIMETER_ALTITUDE_METER,
-    altitude2              = ALTIMETER_ALTITUDE2_METER,
-    stereo_altitude        = STEREO_ALTITUDE_METER,
-    backscatter            = FLUOROMETER_BACKSCATTER_NTU,
-    bottom_depth           = FATHOMETER_OCEAN_DEPTH_METER,
-    cdom                   = FLUOROMETER_CDOM,
-    chlorophyll            = FLUOROMETER_CHLOROPHYLL,
-    # field_of_view_sq_meter = FIELD_OF_VIEW_SQ_METER,
-    field_of_view_source   = FIELD_OF_VIEW_SOURCE,
-    heading                = VEHICLE_MAGNETIC_HEADING,
-    # latitude               = SHIP_LATITUDE,
-    # longitude              = SHIP_LONGITUDE,
-    # millimeter_per_pixel   = MILLIMETER_PER_PIXEL,
-    o2                     = CTD2_DISSOLVED_OXYGEN,
-    pitch                  = VEHICLE_PITCH_ANGLE,
-    roll                   = VEHICLE_ROLL_ANGLE,
-    s                      = CTD_SALINITY,
-    t                      = CTD_TEMPERATURE_CELSIUS,
-    fluorometer_signal     = FLUOROMETER_SIGNAL,
-    datetime               = image_timestamp,
-    v_depth                = CTD_VEHICLE_DEPTH_METER,
-    gear                   = GEAR,
-    cruise_id              = CRUISE_ID,
-    habcam_pk              = HABCAM_PK
-  ) %>%
-  mutate(
-    bottom_depth = altitude + v_depth
-  ) %>%
-  # mutate(
-  #   Imagename = basename(Imagename)
-  # ) %>%
-  distinct(imagename, .keep_all = TRUE)
+# ======================================================================
+# 1. Safe Fallbacks for Transect Logic
+# Just in case these were excluded from the final CSV export
+# ======================================================================
+if(!"transect_group" %in% names(dat_split)) {
+  dat_split <- dat_split %>% 
+    mutate(transect_group = sub("_block_.*", "", transect_block_id))
+}
 
-dat_split <- dat_split %>%
-  mutate(density = n_annotations / field_of_view_sq_meter)
+if(!"transect_position" %in% names(dat_split)) {
+  dat_split <- dat_split %>%
+    group_by(transect_group) %>%
+    mutate(transect_position = row_number() - 1) %>%
+    ungroup()
+}
 
+# ======================================================================
+# 2. Prepare Plotting Data
+# ======================================================================
 dat_plot <- dat_split %>%
   mutate(
+    # Directly map our new dataset column to your plot labels
     split_stage = case_when(
-      is_train == "True" | is_train == TRUE ~ "Detection train",
-      is_test_gam_train == "True" | is_test_gam_train == TRUE ~ "GAM train",
-      is_test_gam_test == "True" | is_test_gam_test == TRUE ~ "GAM test",
+      dataset == "train" ~ "Detection train",
+      dataset == "test_GAM_train" ~ "Calibration train",
+      dataset == "test_GAM_test" ~ "Calibration test",
       TRUE ~ "Other"
     ),
-    density = n_annotations / field_of_view_sq_meter,
     density_class = case_when(
       n_annotations == 0 ~ "0 scallops",
       n_annotations == 1 ~ "1 scallop",
@@ -62,12 +44,14 @@ dat_plot <- dat_split %>%
       n_annotations > 2 ~ ">2 scallops",
       TRUE ~ NA_character_
     ),
-    block_pos = transect_position %% 10,
     transect_group = as.factor(transect_group),
     transect_block_id = as.factor(transect_block_id)
   ) %>%
   filter(!is.na(transect_group), !is.na(transect_position))
 
+# ======================================================================
+# 3. Transect Block Plot (p_blocks)
+# ======================================================================
 p_blocks <- ggplot(
   dat_plot,
   aes(
@@ -88,8 +72,8 @@ p_blocks <- ggplot(
   scale_fill_manual(
     values = c(
       "Detection train" = "black",
-      "GAM train"  = "#2C7FB8",
-      "GAM test"   = "#D95F0E",
+      "Calibration train"  = "#2C7FB8",
+      "Calibration test"   = "#D95F0E",
       "Other"      = "grey80"
     )
   ) +
@@ -107,8 +91,11 @@ p_blocks <- ggplot(
     legend.position = "right"
   )
 
-p_blocks
+print(p_blocks)
 
+# ======================================================================
+# 4. Geospatial Map Plot (p_map_split)
+# ======================================================================
 world <- map_data("world")
 
 p_map_split <- ggplot() +
@@ -151,22 +138,24 @@ p_map_split <- ggplot() +
   scale_color_manual(
     values = c(
       "Detection train" = "black",
-      "GAM train"  = "#2C7FB8",
-      "GAM test"   = "#D95F0E",
+      "Calibration train"  = "#2C7FB8",
+      "Calibration test"   = "#D95F0E",
       "Other"      = "grey80"
     )
   ) +
   labs(
     title = "Georges Banks and Mid-Atlantic Bight",
-    # subtitle = "Grey lines represent transects",
     x = "Longitude",
     y = "Latitude",
     color = "Dataset split"
   ) +
   theme_minimal(base_size = 13)
 
-p_map_split
+print(p_map_split)
 
+# ======================================================================
+# 5. Density Violin Plot (p_density)
+# ======================================================================
 p_density <- ggplot(
   dat_plot,
   aes(x = split_stage, y = n_annotations, fill = split_stage)
@@ -180,8 +169,8 @@ p_density <- ggplot(
   scale_fill_manual(
     values = c(
       "Detection train" = "#4D4D4D",
-      "GAM train"  = "#2C7FB8",
-      "GAM test"   = "#D95F0E",
+      "Calibration train"  = "#2C7FB8",
+      "Calibration test"   = "#D95F0E",
       "Other"      = "grey80"
     )
   ) +
@@ -194,22 +183,24 @@ p_density <- ggplot(
   theme_minimal(base_size = 13) +
   theme(legend.position = "none")
 
-p_density
+print(p_density)
 
-combined_figure <- (p_blocks / (p_density | p_map_split)) + 
-  plot_layout(heights = c(1,1), ) +
+# ======================================================================
+# 6. Combined Figure via Patchwork
+# ======================================================================
+combined_figure <- (p_blocks / p_density) + 
+  plot_layout(heights = c(1,1)) +
   plot_annotation(tag_levels = 'A')
+combined_figure
+# Save outputs
+# save_cal(p_map_split, id = paste0("2226_spatial_strat"), format = "jpg", 
+#          outdir = "../figures/diag2/", width = 8, height = 6)
+# save_cal(p_blocks, id = paste0("2226_spatial_strat_grid"), format = "jpg", 
+#          outdir = "../figures/diag2/", width = 11.75, height = 6)
+# save_cal(p_density, id = paste0("2226_spatial_strat_density"), format = "jpg", 
+#          outdir = "../figures/diag2/", width = 8, height = 6)
 
-# Optional: Save the figure with ggsave
-# ggsave("combined_figure.png", combined_figure, width = 12, height = 10, bg = "white")
-
-save_cal(p_map_split, id = paste0("2224_spatial_strat"), format = "jpg", 
-         outdir = "../figures/diag2/", width = 8, height = 6)
-save_cal(p_blocks, id = paste0("2224_spatial_strat_grid"), format = "jpg", 
-         outdir = "../figures/diag2/", width = 11.75, height = 6)
-save_cal(p_density, id = paste0("2224_spatial_strat_density"), format = "jpg", 
-         outdir = "../figures/diag2/", width = 8, height = 6)
-
-save_cal(combined_figure, id = paste0("2224_spatial_strat_comb"), format = "pdf", 
+save_cal(combined_figure, id = paste0("2226_spatial_strat_comb"), format = "png", 
+         outdir = "../figures/diag3/", width = 10, height = 12.5)
+save_cal(combined_figure, id = paste0("2226_spatial_strat_comb"), format = "pdf", 
          outdir = "../figures/ms_figures/", width = 13.5, height = 12.5)
-  
