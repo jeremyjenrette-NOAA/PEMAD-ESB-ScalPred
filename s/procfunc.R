@@ -1,40 +1,45 @@
-library(tidyverse)
-#============================================================#
-# Functions: Precision–Recall, F1 evaluation, save plot 
-#============================================================#
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(ggplot2)
+
+# ======================================================================
+# 1. Core Precision-Recall Evaluation
+# ======================================================================
 evaluate_pr_curve <- function(
     calib_df,
     img_df,
-    conf_grid = seq(0, 1, by = 0.0005),
+    conf_grid = seq(0, 1, by = 0.0005), # Adjusted step slightly for speed, but can be 0.0005
     model_id  = "model"
 ) {
   
-  purrr::map_dfr(conf_grid, function(th) {
+  map_dfr(conf_grid, function(th) {
     
-    df_th <- calib_df |> dplyr::filter(conf >= th)
+    df_th <- calib_df %>% filter(conf >= th)
     
     TP <- sum(df_th$truedetect, na.rm = TRUE)
     FP <- sum(!df_th$truedetect, na.rm = TRUE)
     
-    auto_true_img <- df_th |>
-      dplyr::filter(truedetect) |>
-      dplyr::count(image_id, name = "n_auto_true")
+    auto_true_img <- df_th %>%
+      filter(truedetect) %>%
+      count(image_id, name = "n_auto_true")
     
-    FN <- img_df |>
-      dplyr::left_join(auto_true_img, by = "image_id") |>
-      dplyr::mutate(
-        n_auto_true = tidyr::replace_na(n_auto_true, 0L),
-        FN = pmax(n_manual - n_auto_true, 0L)
-      ) |>
-      dplyr::summarise(FN = sum(FN, na.rm = TRUE)) |>
-      dplyr::pull(FN)
+    # Calculate False Negatives using the new 'n_annotations' column
+    FN <- img_df %>%
+      left_join(auto_true_img, by = "image_id") %>%
+      mutate(
+        n_auto_true = replace_na(n_auto_true, 0L),
+        FN = pmax(n_annotations - n_auto_true, 0L)
+      ) %>%
+      summarise(FN = sum(FN, na.rm = TRUE)) %>%
+      pull(FN)
     
     precision <- if ((TP + FP) == 0) NA_real_ else TP / (TP + FP)
     recall    <- if ((TP + FN) == 0) NA_real_ else TP / (TP + FN)
     f1        <- if (is.na(precision) || is.na(recall) || (precision + recall) == 0) NA_real_
     else 2 * precision * recall / (precision + recall)
     
-    tibble::tibble(
+    tibble(
       model     = model_id,
       conf      = th,
       TP        = TP,
@@ -47,123 +52,75 @@ evaluate_pr_curve <- function(
   })
 }
 
+# ======================================================================
+# 2. Average Precision (mAP) Calculator via Trapezoidal AUC
+# ======================================================================
+calculate_ap <- function(recall, precision) {
+  valid <- !is.na(recall) & !is.na(precision)
+  r <- recall[valid]
+  p <- precision[valid]
+  
+  if (length(r) < 2) return(NA_real_)
+  
+  # Order by recall ascending to properly calculate AUC
+  ord <- order(r)
+  r <- r[ord]
+  p <- p[ord]
+  
+  # Area under curve using Trapezoidal rule
+  sum(diff(r) * (p[-1] + p[-length(p)]) / 2)
+}
+
+# ======================================================================
+# 3. Model Wrapper (Handles unified .rds list and Regional Toggling)
+# ======================================================================
 evaluate_pr_models <- function(
-    res_list,                         # one res OR list of res
+    models_list, 
     conf_grid = seq(0, 1, by = 0.0005),
-    title = "Precision–Recall",
-    stratify_region = TRUE,           # NEW: if FALSE, pool GB+MAB into one PR curve per model
-    pooled_label = ""             # NEW: suffix for pooled model_id
+    stratify_region = TRUE
 ) {
-  # allow passing a single res directly
-  if (!is.list(res_list)) stop("res_list must be a list")
   
-  is_single_res <- all(c("calib_df","img_df") %in% names(res_list)) ||
-    any(grepl("_GB_calib$|_MAB_calib$", names(res_list)))
-  
-  if (is_single_res) res_list <- list(res_list)
-  
-  # helper: get a named element by exact name or by suffix match
-  get_el <- function(res, key_exact, key_suffix) {
-    if (key_exact %in% names(res)) return(res[[key_exact]])
-    hit <- names(res)[grepl(paste0(key_suffix, "$"), names(res))]
-    if (length(hit) == 1) return(res[[hit]])
-    stop("Couldn't uniquely find: ", key_exact, " or suffix: ", key_suffix)
-  }
-  
-  pr_all <- purrr::map_dfr(res_list, function(res) {
-    # infer model base name from names like "Cas2024v2_GB_calib"
-    model_base <- sub("_.*$", "", names(res)[1])
+  # Loop over the dynamically named models (e.g., YOLO, Cascade)
+  pr_all <- map_dfr(names(models_list), function(mod_name) {
     
-    # If someone passes already-pooled objects (calib_df/img_df), respect that:
-    if (all(c("calib_df", "img_df") %in% names(res)) && !any(grepl("_GB_calib$|_MAB_calib$", names(res)))) {
-      pr <- evaluate_pr_curve(
-        calib_df  = res[["calib_df"]],
-        img_df    = res[["img_df"]],
-        conf_grid = conf_grid,
-        model_id  = paste0(model_base, pooled_label)
-      )
-      return(pr)
+    img_data <- models_list[[mod_name]]$img
+    det_data <- models_list[[mod_name]]$det
+    
+    if (stratify_region) {
+      # Georges Bank subset
+      gb_img <- img_data %>% filter(region == "GB")
+      gb_det <- det_data %>% filter(region == "GB")
+      pr_gb <- evaluate_pr_curve(gb_det, gb_img, conf_grid, paste0(mod_name, " GB"))
+      
+      # Mid-Atlantic Bight subset
+      mab_img <- img_data %>% filter(region == "MAB")
+      mab_det <- det_data %>% filter(region == "MAB")
+      pr_mab <- evaluate_pr_curve(mab_det, mab_img, conf_grid, paste0(mod_name, " MAB"))
+      
+      return(bind_rows(pr_gb, pr_mab))
+      
+    } else {
+      # Pooled across all regions
+      return(evaluate_pr_curve(det_data, img_data, conf_grid, mod_name))
     }
-    
-    GB_calib  <- get_el(res, "GB_calib",  "_GB_calib")
-    GB_img    <- get_el(res, "GB_img",    "_GB_img")
-    MAB_calib <- get_el(res, "MAB_calib", "_MAB_calib")
-    MAB_img   <- get_el(res, "MAB_img",   "_MAB_img")
-    
-    if (isTRUE(stratify_region)) {
-      pr_gb <- evaluate_pr_curve(
-        calib_df  = GB_calib,
-        img_df    = GB_img,
-        conf_grid = conf_grid,
-        model_id  = paste0(model_base, "_GB")
-      )
-      
-      pr_mab <- evaluate_pr_curve(
-        calib_df  = MAB_calib,
-        img_df    = MAB_img,
-        conf_grid = conf_grid,
-        model_id  = paste0(model_base, "_MAB")
-      )
-      
-      pr_em = dplyr::bind_rows(pr_gb, pr_mab)
-      
-      pr_em <- pr_em %>%
-        mutate(
-          model = case_when(
-            model == "Cas2224_GB"      ~ "Cascade R-CNN GB",
-            model == "Cas2224_MAB"     ~ "Cascade R-CNN MAB",
-            model == "YOLOv122224_GB"  ~ "YOLOv12 GB",
-            model == "YOLOv122224_MAB" ~ "YOLOv12 MAB",
-            TRUE ~ model # This keeps any other values exactly as they are
-          )
-        )
-      
-      return(pr_em)
-    }
-    
-    # pooled across regions
-    calib_all <- dplyr::bind_rows(GB_calib, MAB_calib)
-    img_all   <- dplyr::bind_rows(GB_img,   MAB_img)
-    
-    pr_all_model <- evaluate_pr_curve(
-      calib_df  = calib_all,
-      img_df    = img_all,
-      conf_grid = conf_grid,
-      model_id  = paste0(model_base, pooled_label)
-    )
-    
-    pr_all_model
   })
   
-  legend_title <- if (isTRUE(stratify_region)) "Model by region" else "Model"
-  
-  p_pr <- ggplot2::ggplot(pr_all, ggplot2::aes(x = recall, y = precision, color = model)) +
-    ggplot2::geom_path(linewidth = 1.2, na.rm = TRUE) +
-    ggplot2::theme_minimal() +
-    ggplot2::labs(
-      title = title,
+  # Generate standard PR Plot
+  legend_title <- if (stratify_region) "Model by region" else "Model"
+  p_pr <- ggplot(pr_all, aes(x = recall, y = precision, color = model)) +
+    geom_path(linewidth = 1.2, na.rm = TRUE) +
+    theme_minimal() +
+    labs(
+      title = "Precision–Recall",
       x = "Recall",
       y = "Precision",
       color = legend_title
     )
   
-  list(pr_all = pr_all, p_pr = p_pr)
-}
-
-save_pr_f1 <- function(p_pr, p_f1, id, outdir = "~/Downloads",
-                       width = 6, height = 6) {
+  # Calculate mAP for each evaluated model
+  map_summary <- pr_all %>%
+    group_by(model) %>%
+    summarize(Average_Precision = calculate_ap(recall, precision), .groups = "drop")
   
-  ggsave(
-    plot = p_pr,
-    filename = file.path(outdir, paste0("pr_", id, ".jpg")),
-    width = width,
-    height = height
-  )
-  
-  ggsave(
-    plot = p_f1,
-    filename = file.path(outdir, paste0("f1_", id, ".jpg")),
-    width = width,
-    height = height
-  )
+  list(pr_all = pr_all, p_pr = p_pr, map_summary = map_summary)
 }

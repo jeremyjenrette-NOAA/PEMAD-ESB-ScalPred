@@ -1,398 +1,273 @@
-library(mgcv)
 library(dplyr)
 library(ggplot2)
-library(forcats)
-library(scales)
-source("./datfunc.R")
-source("./fitfunc.R")
+library(patchwork)
+library(grid)
+library(mgcv)
+source("./gamfunc.R")
 
-# load("../data/processed/Casfixed2022.RData")
-# load("../data/processed/YOLOv11fixed2022.RData")
-# meta2224 <- read.csv("../data/processed/metadata2224.csv")
-dat_split
+# 1. Load your master metadata and previously evaluated model results
+meta <- read.csv("../data/raw/dataset_split_2226.csv") %>% 
+  janitor::clean_names() %>%
+  mutate(image_id = stringr::str_remove(imagename, "\\.[A-Za-z0-9]+$")) %>%
+  distinct(image_id, .keep_all = TRUE)
 
-model1 = YOLOv12strat2224
-model_name1 = deparse(substitute(YOLOv12strat2224))
+# (Assuming yolo_eval and cas_eval were saved from your gamstrat.R output)
+yolo_eval <- readRDS("../data/processed/YOLOv12_deteval_2226.rds")
+cas_eval  <- readRDS("../data/processed/CascadeR-CNN_deteval_2226.rds")
 
-gams_yolo <- fit_calibration_gams(
-  model = model1,
-  model_name = model_name1,
-  dat_split = dat_split,
-  use_strat = TRUE
+# 2. Build Synergistic Dataset
+img_combined <- build_synergy_dataset(yolo_eval, cas_eval, meta) 
+table(img_combined$dataset)
+
+# ======================================================================
+# 2. Define Systematic Synergistic Candidate Formulas (Regionally Stratified)
+# ======================================================================
+image_candidate_forms <- list(
+  # STAGE 1: Single Model Raw Baselines
+  M01_YoloRaw     = n_annotations ~ s(pred_yolo),
+  M02_CascadeRaw  = n_annotations ~ s(pred_cascade),
+  M03_MeanRaw     = n_annotations ~ s(pred_mean),
+  
+  # STAGE 2: Log-Transformed Single Predictors
+  M04_YoloLog     = n_annotations ~ s(log_yolo_pred),
+  M05_CascadeLog  = n_annotations ~ s(log_cascade_pred),
+  M06_MeanLog     = n_annotations ~ s(log_pred_mean),
+  
+  # STAGE 3: Adding the Disagreement/Difference Covariate
+  M07_YoloDiff    = n_annotations ~ s(log_yolo_pred, pred_diff),
+  M08_CascadeDiff = n_annotations ~ s(log_cascade_pred, pred_diff),
+  M09_MeanDiff    = n_annotations ~ s(log_pred_mean, pred_diff),
+  M09_MeanCasDiff    = n_annotations ~ s(log_pred_mean, pred_diff) + s(log_cascade_pred, pred_diff),
+  M10_YoloLogDiff = n_annotations ~ s(log_yolo_pred, log_pred_diff),
+  
+  
+  # STAGE 4: Multi-Model Synergy
+  M11_Additive    = n_annotations ~ s(log_yolo_pred) + s(log_cascade_pred) + s(log_pred_diff),
+  M12_Tensor      = n_annotations ~ te(log_yolo_pred, log_cascade_pred),
+  M13_TensorDiff  = n_annotations ~ ti(log_yolo_pred, log_cascade_pred) + log_pred_diff,
+  M14_Champion    = n_annotations ~ s(log_yolo_pred, log_pred_diff) + s(log_cascade_pred, log_pred_diff)
 )
 
-model2 = Casv2strat2224
-model_name2 = deparse(substitute(Casv2strat2224))
+cat("--- Synergy Selection: Georges Bank ---\n")
+print(compare_image_gams(img_combined, image_candidate_forms, "GB"))
 
-gams_cas <- fit_calibration_gams(
-  model = model2,
-  model_name = model_name2,
-  dat_split = dat_split,
-  use_strat = TRUE
-)
+cat("--- Synergy Selection: Mid-Atlantic Bight ---\n")
+print(compare_image_gams(img_combined, image_candidate_forms, "MAB"))
 
-img_yolo  <- run_model_pipeline(model1, model_name1, gams = gams_yolo, test = FALSE, 
-                                dat_split = dat_split, use_strat = TRUE)
+# Assign the winners dynamically based on your tests!
+# M09_MeanDiff best for total count error
+best_syn_gb  <- image_candidate_forms$M09_MeanCasDiff
+best_syn_mab <- image_candidate_forms$M09_MeanCasDiff
+# ======================================================================
+# 3. Train and Test Final Synergistic Model
+# ======================================================================
+syn_gams <- fit_synergy_gams(img_combined, best_syn_gb, best_syn_mab)
+syn_eval <- test_synergy_gams(syn_gams, img_combined)
+# ======================================================================
+# 4. The 12-Panel Plot Generation
+# ======================================================================
 
-img_cas  <- run_model_pipeline(model2, model_name2, gams = gams_cas, test = FALSE,
-                               dat_split = dat_split, use_strat = TRUE)
-
-img_yolo_test  <- run_model_pipeline(model1, model_name1, gams = gams_yolo, test = TRUE, 
-                                dat_split = dat_split, use_strat = TRUE)
-
-img_cas_test  <- run_model_pipeline(model2, model_name2, gams = gams_cas, test = TRUE,
-                               dat_split = dat_split, use_strat = TRUE)
-
-# for some reason, there is a very small number of mismatch images
-# this makes sure the gam receives only the matches
-common_ids <- intersect(img_yolo$img$imagename, img_cas$img$imagename)
-
-common_ids_test <- intersect(img_yolo_test$img$imagename, img_cas_test$img$imagename)
-
-img_combined <- img_yolo$img %>%
-  filter(imagename %in% common_ids) %>%
-  select(imagename, region,
-         pred_yolo = predicted_number,
-         true_number) %>%
-  left_join(
-    img_cas$img %>%
-      filter(imagename %in% common_ids) %>%
-      select(imagename,
-             pred_cascade = predicted_number),
-    by = "imagename"
-  ) %>%
-  mutate(
-    pred_mean = (pred_yolo + pred_cascade)/2,
-    pred_diff = pred_cascade - pred_yolo,
-    pred_sum  = pred_yolo + pred_cascade,
-    log_yolo_pred = log1p(pred_yolo),
-    log_cascade_pred = log1p(pred_cascade),
-    log_pred_diff = log1p(abs(pred_diff)),
-    log_true_number = log1p(true_number + 1e-6)
-  )
-
-img_combined_test <- img_yolo_test$img %>%
-  filter(imagename %in% common_ids_test) %>%
-  select(imagename, region,
-         pred_yolo = predicted_number,
-         true_number) %>%
-  left_join(
-    img_cas_test$img %>%
-      filter(imagename %in% common_ids_test) %>%
-      select(imagename,
-             pred_cascade = predicted_number),
-    by = "imagename"
-  ) %>%
-  mutate(
-    pred_mean = (pred_yolo + pred_cascade)/2,
-    pred_diff = pred_cascade - pred_yolo,
-    pred_sum  = pred_yolo + pred_cascade,
-    log_yolo_pred = log1p(pred_yolo),
-    log_cascade_pred = log1p(pred_cascade),
-    log_pred_diff = log1p(abs(pred_diff)),
-    log_true_number = log1p(true_number + 1e-6)
-  )
-
-img_combined <- attach_metadata_to_images(
-  img_df  = img_combined,
-  meta_df = dat_split
-)
-
-img_combined_test <- attach_metadata_to_images(
-  img_df  = img_combined_test,
-  meta_df = dat_split
-)
-
-models <- list(
+# A. Helper function with axis controls and zoom capabilities
+make_1to1_plot <- function(data, x_col, region_name, plot_title, r2, rmse, pt_color, 
+                           show_x = FALSE, show_y = FALSE, zoom_limit = NULL) {
   
-  m1 = gam(true_number ~ s(pred_yolo, pred_diff), 
-           family = nb(), data = img_combined),
+  val_r2 <- round(r2, 3)
+  val_rmse <- round(rmse, 3)
+  label_text <- sprintf("R² = %.3f\nRMSE = %.3f", val_r2, val_rmse)
   
-  m2 = gam(true_number ~ s(pred_cascade, pred_diff), 
-           family = nb(), data = img_combined),
+  p <- ggplot(data %>% filter(region == region_name), aes_string(x = x_col, y = "n_annotations")) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey40") +
+    geom_point(color = pt_color, size = 1.2, alpha = 0.5) +
+    geom_text(
+      x = -Inf, y = Inf, label = label_text, 
+      hjust = -0.2, vjust = 1.5, size = 3.5, fontface = "plain"
+    ) +
+    theme_bw(base_size = 12) +
+    labs(title = plot_title, x = "Predicted Count", y = "True Count") +
+    theme(plot.title = element_text(face = "plain", size = 11, hjust = 0.5))
   
-  m3 = gam(true_number ~ pred_diff, 
-           family = nb(), data = img_combined),
+  # Conditionally remove axis titles to reduce clutter
+  if (!show_x) p <- p + theme(axis.title.x = element_blank())
+  if (!show_y) p <- p + theme(axis.title.y = element_blank())
   
-  m4 = gam(true_number ~ ti(pred_yolo, pred_cascade) + pred_diff, 
-           family = nb(), data = img_combined),
+  # Apply zoom if a limit is provided
+  if (!is.null(zoom_limit)) {
+    p <- p + coord_cartesian(xlim = c(0, zoom_limit), ylim = c(0, zoom_limit))
+  }
   
-  # m5 = gam(true_number ~ ti(pred_yolo, pred_cascade) +
-  #   s(pred_yolo - pred_cascade) + ti(pred_yolo, pred_cascade, by = pred_diff),
-  #   family = nb(), data = img_combined),
-  
-  m6 = gam(true_number ~ s(pred_yolo, pred_diff, bs = "tp"),
-           family = nb(), data = img_combined),
-  
-  m7 = gam(true_number ~ s(log_yolo_pred, pred_diff),
-           family = nb(), data = img_combined),
-  
-  m75 = gam(true_number ~ region + s(log_yolo_pred, pred_diff),
-           family = nb(), data = img_combined),
-  
-  m8 = gam(true_number ~ s(log_cascade_pred, pred_diff),
-           family = nb(), data = img_combined),
-  
-  m9 = gam(true_number ~ s(log_yolo_pred, pred_diff, bs = "tp"),
-            family = nb(), data = img_combined),
-  
-  m10 = gam(log_true_number ~ s(log_yolo_pred, log_pred_diff),
-           family = nb(), data = img_combined),
-  
-  m11 = gam(log_true_number ~ s(log_yolo_pred, pred_diff),
-           family = nb(), data = img_combined)
-  )
-
-
-evaluate_model <- function(model, data) {
-  pred <- predict(model, type = "response")
-  true <- data$true_number
-  
-  data.frame(
-    Model = deparse(formula(model)),  # <- this is the key line
-    AIC = AIC(model),
-    RMSE = sqrt(mean((pred - true)^2)),
-    MAE = mean(abs(pred - true)),
-    Deviance = deviance(model)
-  )
+  return(p)
 }
 
-results <- lapply(models, evaluate_model, data = img_combined)
-results_df <- do.call(rbind, results)
+# B. Prepare data and calculate dynamics limits/metadata
+y_test <- yolo_eval$img_eval %>% filter(dataset == "test_GAM_test")
+ym <- yolo_eval$metrics
 
-rownames(results_df) <- names(models)  # keep m1, m2, etc.
-results_df
+c_test <- cas_eval$img_eval %>% filter(dataset == "test_GAM_test")
+cm <- cas_eval$metrics
 
-df_eval_train <- data.frame(
-  pred = predict(models$m1, type = "response"),
-  true = img_combined$true_number
-)
+s_test <- syn_eval$img_eval
+sm <- syn_eval$metrics
 
-df_eval <- data.frame(
-  pred = predict(models$m8, newdata = img_combined_test, type = "response"),
-  true = img_combined_test$true_number
-)
+# Dynamically calculate the 95th percentile limit for the zoomed plots (ensure minimum limit of 5)
+limit_gb <- max(5, quantile(y_test$n_annotations[y_test$region == "GB"], 0.95, na.rm = TRUE))
+limit_mab <- max(5, quantile(y_test$n_annotations[y_test$region == "MAB"], 0.95, na.rm = TRUE))
 
-pred <- df_eval$pred
-true <- df_eval$true
+# Calculate n for subcaption
+n_gb <- nrow(y_test %>% filter(region == "GB"))
+n_mab <- nrow(y_test %>% filter(region == "MAB"))
 
-rmse <- sqrt(mean((pred - true)^2))
-mae  <- mean(abs(pred - true))
+n_gb_abundance <- sum((y_test %>% filter(region == "GB"))$n_annotations)
+n_mab_abundance <- sum((y_test %>% filter(region == "MAB"))$n_annotations)
 
-# Correlation-based R² (good for visualization)
-r2 <- cor(pred, true)^2
+# C. Build the 12 plots sequentially
+p <- list()
 
-# Deviance (from model)
-dev <- deviance(models$m8)
+# -- Row 1: YOLOv12 (Red Points) --
+p[[1]] <- make_1to1_plot(y_test, "predicted_number", "GB", "YOLOv12 \u03A3 P(detection)", ym$r2_calibrated[ym$region=="GB"], ym$rmse_calibrated[ym$region=="GB"], "red", show_x = FALSE, show_y = TRUE)
+p[[2]] <- make_1to1_plot(y_test, "predicted_f1_number", "GB", expression("YOLOv12 F"[1] ~ "Threshold"), ym$r2_f1[ym$region=="GB"], ym$rmse_f1[ym$region=="GB"], "red", show_x = FALSE, show_y = FALSE)
+p[[3]] <- make_1to1_plot(y_test, "predicted_number", "MAB", "YOLOv12 \u03A3 P(detection)", ym$r2_calibrated[ym$region=="MAB"], ym$rmse_calibrated[ym$region=="MAB"], "red", show_x = FALSE, show_y = FALSE)
+p[[4]] <- make_1to1_plot(y_test, "predicted_f1_number", "MAB", expression("YOLOv12 F"[1] ~ "Threshold"), ym$r2_f1[ym$region=="MAB"], ym$rmse_f1[ym$region=="MAB"], "red", show_x = FALSE, show_y = FALSE)
 
-# AIC
-aic = AIC(models$m8)
+# -- Row 2: Cascade R-CNN (Blue Points) --
+p[[5]] <- make_1to1_plot(c_test, "predicted_number", "GB", "Cascade R-CNN \u03A3 P(detection)", cm$r2_calibrated[cm$region=="GB"], cm$rmse_calibrated[cm$region=="GB"], "#2C7FB8", show_x = FALSE, show_y = TRUE)
+p[[6]] <- make_1to1_plot(c_test, "predicted_f1_number", "GB", expression("Cascade R-CNN F"[1] ~ "Threshold"), cm$r2_f1[cm$region=="GB"], cm$rmse_f1[cm$region=="GB"], "#2C7FB8", show_x = FALSE, show_y = FALSE)
+p[[7]] <- make_1to1_plot(c_test, "predicted_number", "MAB", "Cascade R-CNN \u03A3 P(detection)", cm$r2_calibrated[cm$region=="MAB"], cm$rmse_calibrated[cm$region=="MAB"], "#2C7FB8", show_x = FALSE, show_y = FALSE)
+p[[8]] <- make_1to1_plot(c_test, "predicted_f1_number", "MAB", expression("Cascade R-CNN F"[1] ~ "Threshold"), cm$r2_f1[cm$region=="MAB"], cm$rmse_f1[cm$region=="MAB"], "#2C7FB8", show_x = FALSE, show_y = FALSE)
 
-plot(residuals(models$m75) ~ img_combined$pred_yolo, main = "YOLO")
-abline(h=0, col = "red", lty = 2)
-plot(residuals(models$m75) ~ img_combined$pred_cascade, main = "Cascade R-CNN")
-abline(h=0, col = "red", lty = 2)
-plot(residuals(models$m75) ~ img_combined$pred_diff, main = "Cascade - YOLO")
-abline(h=0, col = "red", lty = 2)
-########################################################################
-## confirm two similar model eval
-# library(rsample)
-# library(purrr)
-# 
-# folds <- rsample::vfold_cv(img_combined, v = 5)
-# 
-# cv_results <- folds %>%
-#   mutate(
-#     model = map(splits, ~ gam(
-#       true_number ~ te(pred_yolo, pred_cascade) + abs(pred_diff),
-#       family = nb(),
-#       data = rsample::analysis(.x)
-#     )),
-#     pred = map2(model, splits, ~ predict(.x, newdata = rsample::assessment(.y), type = "response")),
-#     truth = map(splits, ~ rsample::assessment(.x)$true_number)
-#   )
-# cv_results <- cv_results %>%
-#   mutate(
-#     rmse = map2_dbl(pred, truth, ~ sqrt(mean((.x - .y)^2))),
-#     mae  = map2_dbl(pred, truth, ~ mean(abs(.x - .y)))
-#   )
-# 
-# mean(cv_results$rmse)
-# mean(cv_results$mae)
-########################################################################
-library(ggplot2)
+# -- Row 3: Synergy Image-GAM (Purple Points, Full and Zoomed) --
+p[[9]]  <- make_1to1_plot(s_test, "pred_synergy", "GB", "Synergistic GAM", sm$r2_synergy[sm$region=="GB"], sm$rmse_synergy[sm$region=="GB"], "#7570B3", show_x = TRUE, show_y = TRUE)
+p[[10]] <- make_1to1_plot(s_test, "pred_synergy", "GB", "Synergistic GAM (95% Data)", sm$r2_synergy[sm$region=="GB"], sm$rmse_synergy[sm$region=="GB"], "#7570B3", show_x = TRUE, show_y = FALSE, zoom_limit = limit_gb)
+p[[11]] <- make_1to1_plot(s_test, "pred_synergy", "MAB", "Synergistic GAM", sm$r2_synergy[sm$region=="MAB"], sm$rmse_synergy[sm$region=="MAB"], "#7570B3", show_x = TRUE, show_y = FALSE)
+p[[12]] <- make_1to1_plot(s_test, "pred_synergy", "MAB", "Synergistic GAM (95% Data)", sm$r2_synergy[sm$region=="MAB"], sm$rmse_synergy[sm$region=="MAB"], "#7570B3", show_x = TRUE, show_y = FALSE, zoom_limit = limit_mab)
 
-disagreement = ggplot(img_combined, aes(x = pred_diff, y = true_number)) +
-  geom_point(alpha = 0.25, size = 2, color = "#2C7FB8") +
-  geom_smooth(
-    method = "gam",
-    formula = y ~ s(x, k = 7),
-    color = "#D95F02",
-    linewidth = 1.2,
-    se = TRUE
-  ) +
-  labs(
-    title = "2022-2024: Model Disagreement on True Scallop Count",
-    # subtitle = "Difference = Cascade prediction - YOLO prediction",
-    x = "Prediction Difference (Cascade - YOLO)",
-    y = "True Scallop Count"
-  ) +
-  theme_minimal(base_size = 14) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    plot.subtitle = element_text(color = "gray40")
-  )
-disagreement
-########################################################################
-label_text <- paste0(
-  "R² = ", round(r2, 3), "\n",
-  "RMSE = ", round(rmse, 3), "\n",
-  "MAE = ", round(mae, 3), "\n",
-  "AIC = ", round(aic, 1)
-)
 
-gammod = ggplot(df_eval, aes(x = pred, y = true)) +
-  geom_point(alpha = 0.25, size = 2, color = "black") +
-  
-  # Perfect prediction line
-  # geom_abline(
-  #   slope = 1, intercept = 0,
-  #   linetype = "dashed",
-  #   color = "gray50",
-  #   linewidth = 1
-  # ) +
-  
-  # Fitted relationship
-  geom_smooth(
-    method = "lm",
-    color = "black",
-    linewidth = 1.2,
-    se = TRUE
-  ) +
-  
-  # Metrics annotation
-  annotate(
-    "label",
-    x = Inf, y = -Inf,
-    label = label_text,
-    hjust = 1.1, vjust = -0.1,
-    size = 4.5,
-    fill = "white",
-    color = "black",
-    label.size = 0.3
-  ) +
-  
-  labs(
-    title = "2022 - 2024: Predicted vs True Scallop Counts",
-    subtitle = paste0("Model: ", "true_number ~ region + s(log_cas_pred, pred_diff)"),
-    x = "Predicted Count",
-    y = "True Count"
-  ) +
-  
-  coord_equal() +
-  
-  theme_minimal(base_size = 14) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    plot.subtitle = element_text(color = "gray40")
-  )
-gammod
+# ======================================================================
+# 5. Assemble and Export the 12-Panel Masterpiece
+# ======================================================================
 
-true_total <- sum(df_eval$true, na.rm = TRUE)
+# Create Overarching Headers using Grid graphics wrapped for patchwork
+gb_header  <- wrap_elements(textGrob("Georges Bank", gp = gpar(fontsize = 16, fontface = "bold")))
+mab_header <- wrap_elements(textGrob("Mid-Atlantic Bight", gp = gpar(fontsize = 16, fontface = "bold")))
+header_row <- gb_header | mab_header
 
-summary_df <- data.frame(
-  metric = c("True", "Cascade R-CNN", "YOLOv12", "s(YOLOv12 - Cascade)", "YOLOv12 F1", "Cascade R-CNN F1"),
-  value  = c(
-    true_total,
-    sum(img_cas_test$calib_df$pred_p, na.rm = TRUE),
-    sum(img_yolo_test$calib_df$pred_p, na.rm = TRUE),
-    sum(df_eval$pred, na.rm = TRUE),
-    sum(img_yolo_test$img$predicted_f1_number, na.rm = TRUE),
-    sum(img_cas_test$img$predicted_f1_number, na.rm = TRUE)
-  )
-) %>%
-  mutate(
-    error = value - true_total,
-    pct_error = 100 * error / true_total,
-    abs_pct_error = abs(pct_error),
-    label = paste0(
-      comma(round(value, 0)),
-      "\n",
-      ifelse(metric == "True", "Groundtruth",
-             paste0(ifelse(error > 0, "+", ""), round(pct_error, 1), "%"))
-    ),
-    metric = fct_reorder(metric, abs_pct_error, .desc = TRUE)
-  )
+# Assemble the rows (4 columns wide)
+row1 <- p[[1]] | p[[2]] | p[[3]] | p[[4]]
+row2 <- p[[5]] | p[[6]] | p[[7]] | p[[8]]
+row3 <- p[[9]] | p[[10]]| p[[11]]| p[[12]]
 
-summary_error_df <- summary_df %>%
-  filter(metric != "True") %>%
-  mutate(
-    metric = fct_reorder(metric, pct_error),
-    error_label = paste0(
-      ifelse(error > 0, "+", ""),
-      comma(round(error, 0)),
-      " scallops\n",
-      ifelse(pct_error > 0, "+", ""),
-      round(pct_error, 1),
-      "%"
+# Create dynamic subcaption string
+caption_string <- sprintf("Datasets: 2022-2024, 2026 | Models Evaluated: YOLOv12, Cascade R-CNN, Synergistic GAM\nHoldout Test Images: Georges Bank (n = %d), Mid-Atlantic Bight (n = %d)\nScallop Abundance: Georges Bank (n = %d), Mid-Atlantic Bight (n = %d)", n_gb, n_mab, n_gb_abundance, n_mab_abundance)
+
+# Stitch it all together: Header row on top, followed by the 3 data rows
+final_plot <- (header_row / row1 / row2 / row3) + 
+  plot_layout(heights = c(0.1, 1, 1, 1)) + # Gives the header a slim vertical footprint
+  plot_annotation(
+    title = bquote(bold("Comparative Assessment: Optimal F"[1] ~ "vs. Detection GAMs vs. Synergistic Calibration")),
+    caption = caption_string,
+    theme = theme(
+      plot.title = element_text(size = 18, face = "bold", hjust = 0.5, margin = margin(b = 10)),
+      plot.caption = element_text(size = 12, face = "italic", color = "grey30", hjust = 0.5, margin = margin(t = 15))
     )
   )
 
-p_error_summary <- ggplot(summary_error_df, aes(x = metric, y = pct_error)) +
-  
-  geom_col(
-    width = 0.7,
-    color = "black",
-    linewidth = 0.3
-  ) +
-  
-  geom_text(
-    aes(
-      label = error_label,
-      hjust = ifelse(pct_error >= 0, -0.05, 1.05)
-    ),
-    size = 4
-  ) +
-  
-  coord_flip(clip = "off") +
-  
-  scale_y_continuous(
-    labels = function(x) paste0(x, "%"),
-    expand = expansion(mult = c(0.18, 0.18))
-  ) +
-  
-  labs(
-    title = "Abundance Estimation Error by Method",
-    subtitle = paste0("True Abundance = ", comma(round(true_total, 0)), " scallops"),
-    x = NULL,
-    y = "Percent error"
-  ) +
-  
-  theme_minimal(base_size = 14) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    plot.subtitle = element_text(color = "gray40"),
-    axis.text.y = element_text(face = "bold"),
-    legend.position = "none",
-    plot.margin = margin(10, 45, 10, 10)
+print(final_plot)
+
+# Save the high-resolution figure
+ggsave(
+  filename = "../figures/ms_figures/2226_12panel_calibration_summary.png",
+  plot = final_plot,
+  width = 13,
+  height = 12,
+  device = "png",
+  bg = "white"
+)
+
+
+
+###########################################################################
+
+# ======================================================================
+# 6. Final Comprehensive Abundance Summary Plot
+# ======================================================================
+
+# Ensure we are strictly using the holdout test set
+true_val <- sum(s_test$n_annotations, na.rm = TRUE)
+
+# Build the comparison dataframe
+sum_df <- data.frame(
+  Method = factor(
+    c("True Abundance", 
+      "YOLOv12 F1", "YOLOv12 Det-GAM", 
+      "Cascade F1", "Cascade Det-GAM", 
+      "Synergistic GAM"),
+    levels = c("True Abundance", 
+               "YOLOv12 F1", "YOLOv12 Det-GAM", 
+               "Cascade F1", "Cascade Det-GAM", 
+               "Synergistic GAM")
+  ),
+  Value = c(
+    true_val,
+    sum(y_test$predicted_f1_number, na.rm = TRUE),
+    sum(y_test$predicted_number, na.rm = TRUE),
+    sum(c_test$predicted_f1_number, na.rm = TRUE),
+    sum(c_test$predicted_number, na.rm = TRUE),
+    sum(s_test$pred_synergy, na.rm = TRUE)
+  )
+)
+
+library(forcats) 
+library(latex2exp)
+library(ggplot2)
+library(dplyr)
+
+# 1. Define the Labels in the EXACT same order as the factor levels
+label_map <- c(
+  "True Abundance"  = "True~Abundance",
+  "YOLOv12 F1"      = "YOLO~F[1]",
+  "YOLOv12 Det-GAM" = "YOLO~Sigma*p[det]", # Moved to 3rd to match factor levels
+  "Cascade F1"      = "Cascade~F[1]",       # Moved to 4th to match factor levels
+  "Cascade Det-GAM" = "Cascade~Sigma*p[det]",
+  "Synergistic GAM" = "Synergistic~GAM"
+)
+
+sum_df <- sum_df %>%
+  mutate(
+    Error_Pct = ((Value - true_val) / true_val) * 100,
+    Label_Text = case_when(
+      Method == "True Abundance" ~ as.character(round(Value, 0)),
+      TRUE ~ sprintf("%d\n(%+.1f%%)", round(Value, 0), Error_Pct)
+    )
   )
 
-p_error_summary
+# Update global text geom defaults once before plotting
+ggplot2::update_geom_defaults("text", list(family = "sans"))
 
-p_resid = df_eval %>%
-  mutate(residual = pred - true) %>%
-  ggplot(aes(true, residual)) +
-  geom_point(alpha = 0.5) +
-  geom_hline(yintercept = 0, linetype = "dashed") +
-  labs(title = "Residuals vs True Count",
-       subtitle = "s(YOLOv12 - Cascade R-CNN)")
-p_resid
+# 2. Generate the plot with parsed expressions directly
+p_sum_final <- ggplot(sum_df, aes(x = Method, y = Value, fill = Method)) +
+  geom_col(width = 0.7, color = "black") +
+  geom_hline(yintercept = true_val, linetype = "dashed", color = "black", linewidth = 1.0) +
+  geom_text(aes(label = Label_Text), y = 10000, 
+            vjust = 0, fontface = "bold", size = 3.5) +
+  scale_fill_manual(values = c(
+    "True Abundance"  = "grey40", 
+    "YOLOv12 F1"      = "#FB6A4A", 
+    "Cascade F1"      = "#6BAED6", 
+    "YOLOv12 Det-GAM" = "#CB181D", 
+    "Cascade Det-GAM" = "#2171B5", 
+    "Synergistic GAM" = "#7570B3"
+  )) +
+  
+  # Parse the properly ordered label map directly here
+  scale_x_discrete(labels = parse(text = label_map)) + 
+  scale_y_continuous(expand = expansion(mult = c(0, 0.25))) + 
+  theme_minimal(base_size = 14) +
+  labs(title = "Validated Abundance Estimates", x = "", y = "Total Sum Count") +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 35, hjust = 1, size = 11, face = "plain"),
+    plot.title = element_text(face = "bold", hjust = 0.5)
+  )
 
-save_cal(p_sum, id = paste("2224_",model_name, "_sum_strat_all",sep=""), 
-         outdir = "../figures/diag2/", format = "png", width = 5, height = 4.5)
-save_cal(gammod, id = paste("2224yolov12cas_gammod",sep=""),
-         outdir = "../figures/diag2/", width = 6, height = 7, format = "png")
-save_cal(p_error_summary, id = paste("2224total_error",sep=""),
-         outdir = "../figures/diag2/", width = 9, height = 8, format = "png")
-save_cal(p_resid, id = paste("2224total_residual",sep=""),
-         outdir = "../figures/diag2/", width = 5, height = 4.5, format = "png")
+# Save the final render
+ggsave("../figures/ms_figures/2226_final_abundance_summary.png", 
+       plot = p_sum_final, width = 8, height = 6, dpi = 300)

@@ -1,147 +1,167 @@
-source("./fitfunc.R")
+library(dplyr)
+library(ggplot2)
 source("./gamfunc.R")
 source("./procfunc.R")
 
-load("../data/processed/Casv2strat2224.RData")
-load("../data/processed/YOLOv12strat2224.RData")
+# ======================================================================
+# 1. Load Data
+# ======================================================================
+models <- readRDS("../data/processed/eval_2226.rds")
 
-dat_split = read.csv("../data/raw/dataset_split_2224.csv")
-table(dat_split$is_test_gam_train)
-table(dat_split$is_test_gam_test)
-colnames(dat_split)
+# Standardize names if not already done in the RDS builder
+names(models)[names(models) == "YOLO"] <- "YOLOv12"
+names(models)[names(models) == "Cascade"] <- "Cascade R-CNN"
 
-model = YOLOv12strat2224
-model_name = deparse(substitute(YOLOv12strat2224))
-
-# trains GAMs on is_test_gam_train (65% of detection test - stratified space x density)
-gams <- fit_calibration_gams(
-  model = model,
-  model_name = model_name,
-  dat_split = dat_split,
-  use_strat = TRUE
+# ======================================================================
+# 2. Define Candidate Detection-Level GAM Structures (Systematic Stepwise)
+# ======================================================================
+candidate_forms <- list(
+  # STAGE 1: Additive Isotropic Splines (Proving independent covariate importance)
+  M01_ConfOnly = truedetect ~ s(conf, k = 5),
+  M02_Spatial  = truedetect ~ s(conf, k = 5) + s(latitude, longitude, k = 7),
+  M03_Depth    = truedetect ~ s(conf, k = 5) + s(latitude, longitude, k = 7) + s(bottom_depth, k = 5),
+  M04_Optical  = truedetect ~ s(conf, k = 5) + s(latitude, longitude, k = 7) + s(bottom_depth, k = 5) + s(altitude, k = 5) + s(field_of_view_sq_meter, k = 5),
+  M05_Boxsize  = truedetect ~ s(conf, k = 5) + s(latitude, longitude, k = 7) + s(bottom_depth, k = 5) + s(altitude, k = 5) + s(boxsize, k = 5),
+  M06_Environ  = truedetect ~ s(conf, k = 5) + s(latitude, longitude, k = 7) + s(bottom_depth, k = 5) + s(fluorometer_backscatter_ntu, k = 5),
+  
+  # STAGE 2: Tensor Products (Proving Confidence interacts with physical scale)
+  M07_teDepth   = truedetect ~ te(conf, bottom_depth, k = 5) + s(latitude, longitude, k = 7),
+  M08_teAlt     = truedetect ~ te(conf, altitude, k = 5) + s(latitude, longitude, k = 7) + s(bottom_depth, k = 5),
+  M09_teOptics  = truedetect ~ te(conf, altitude, k = 5) + te(conf, field_of_view_sq_meter, k = 5) + s(latitude, longitude, k = 7),
+  M10_teBoxsize = truedetect ~ te(conf, boxsize, k = 5) + te(conf, altitude, k = 5) + s(latitude, longitude, k = 7),
+  
+  # STAGE 3: The "Previous Best" & Fine-Tuning
+  M11_PrevBest  = truedetect ~ te(conf, altitude, k = 5) + s(latitude, longitude, k = 7) + te(conf, field_of_view_sq_meter, k = 7) + te(conf, boxsize, k = 7),
+  M12_PB_Depth  = truedetect ~ te(conf, altitude, k = 5) + s(latitude, longitude, k = 7) + te(conf, field_of_view_sq_meter, k = 7) + te(conf, boxsize, k = 7) + s(bottom_depth, k = 5),
+  M13_PB_Backsc = truedetect ~ te(conf, altitude, k = 5) + s(latitude, longitude, k = 7) + te(conf, field_of_view_sq_meter, k = 7) + te(conf, boxsize, k = 7) + s(fluorometer_backscatter_ntu, k = 5),
+  M14_PB_Temp   = truedetect ~ te(conf, altitude, k = 5) + s(latitude, longitude, k = 7) + te(conf, field_of_view_sq_meter, k = 7) + te(conf, boxsize, k = 7) + s(ctd_temperature_celsius, k = 5),
+  M15_All_te    = truedetect ~ te(conf, altitude, k = 5) + s(latitude, longitude, k = 7) + te(conf, field_of_view_sq_meter, k = 7) + te(conf, boxsize, k = 7) + te(conf, bottom_depth, k = 5)
 )
 
-summary(gams$GB); summary(gams$MAB)
-AIC(gams$GB); AIC(gams$MAB)
+# ======================================================================
+# 3. Model Selection (Example: Testing structures on YOLO for Georges Bank)
+# ======================================================================
+cat("--- Running Model Selection Phase ---\n")
+selection_results_yolo_GB <- compare_detection_gams(
+  det_df = models$YOLOv12$det, 
+  candidate_formulas = candidate_forms, 
+  region_focus = "GB"
+)
 
-# tests GAMs on is_test_gam_test (35% of detection test - stratified space x density)
-pred = run_model_pipeline(model, model_name, gams = gams, test = TRUE,
-                               dat_split = dat_split, use_strat = TRUE)
+selection_results_yolo_MAB <- compare_detection_gams(
+  det_df = models$YOLOv12$det, 
+  candidate_formulas = candidate_forms, 
+  region_focus = "MAB"
+)
 
-# ---- Step 1: rename regions FIRST ----
-img_df <- pred$img %>%
-  mutate(
-    region = recode(region,
-                    "GB" = "Georges Bank",
-                    "MAB" = "Mid-Atlantic Bight"
-    )
+selection_results_cascade_GB <- compare_detection_gams(
+  det_df = models$`Cascade R-CNN`$det, 
+  candidate_formulas = candidate_forms, 
+  region_focus = "GB"
+)
+
+selection_results_cascade_MAB <- compare_detection_gams(
+  det_df = models$`Cascade R-CNN`$det, 
+  candidate_formulas = candidate_forms, 
+  region_focus = "MAB"
+)
+
+print(selection_results_yolo_GB)
+print(selection_results_yolo_MAB)
+print(selection_results_cascade_GB)
+print(selection_results_cascade_MAB)
+
+# Pick the best formulas based on the selection results! 
+# (You could automate this, but it is safer to manually inspect the AIC table and define them here)
+best_formula_yolo_gb  <- candidate_forms$M15_All_te 
+best_formula_yolo_mab <- candidate_forms$M15_All_te
+best_formula_cascade_gb  <- candidate_forms$M14_PB_Temp 
+best_formula_cascade_mab <- candidate_forms$M14_PB_Temp
+
+model_names_to_run <- c("YOLOv12", "Cascade R-CNN")
+
+# ======================================================================
+# 3. Iterative Pipeline
+# ======================================================================
+for (mod_name in model_names_to_run) {
+  cat("\n========================================\n")
+  cat("Running Pipeline for:", mod_name, "\n")
+  cat("========================================\n")
+  
+  mod_data <- models[[mod_name]]
+  
+  # A. Dynamically Calculate Optimal F1 Thresholds per Region
+  cat("Evaluating PR to find optimal F1 thresholds...\n")
+  temp_model_list <- list()
+  temp_model_list[[mod_name]] <- mod_data
+  
+  # We use evaluate_pr_models to get the curves, then filter for the max F1
+  out_pr <- evaluate_pr_models(temp_model_list, stratify_region = TRUE)
+  best_pts <- out_pr$pr_all %>%
+    group_by(model) %>%
+    filter(f1 == max(f1, na.rm = TRUE)) %>%
+    slice_max(conf, n = 1) %>% 
+    ungroup()
+  
+  # Extract specific thresholds safely
+  thresh_gb  <- best_pts %>% filter(grepl(" GB$", model)) %>% pull(conf)
+  thresh_mab <- best_pts %>% filter(grepl(" MAB$", model)) %>% pull(conf)
+  
+  cat("  -> GB F1 Threshold:", thresh_gb, "\n")
+  cat("  -> MAB F1 Threshold:", thresh_mab, "\n")
+  
+  f1_list <- list(GB = thresh_gb, MAB = thresh_mab)
+  
+  if (mod_name == "YOLOv12") {
+  
+  # B. Train Calibration GAMs
+  gams <- fit_calibration_gams(
+    det_df = mod_data$det,
+    formula_gb = best_formula_yolo_gb,
+    formula_mab = best_formula_yolo_mab
   )
-
-# ---- Step 2: compute counts AFTER renaming ----
-region_counts <- img_df %>%
-  count(region, name = "n_images")
-
-total_n <- sum(region_counts$n_images)
-
-# ---- Step 3: create labels ----
-region_labels <- region_counts %>%
-  mutate(region_label = paste0(region, " (n = ", n_images, ")"))
-
-# ---- Step 4: apply labels ----
-img_df <- img_df %>%
-  left_join(region_labels, by = "region") %>%
-  mutate(region = region_label) %>%
-  select(-region_label)
-
-metrics <- pred$metrics %>%
-  mutate(
-    region = recode(region,
-                    "GB" = "Georges Bank",
-                    "MAB" = "Mid-Atlantic Bight"
-    )
-  ) %>%
-  left_join(region_labels, by = "region") %>%
-  mutate(region = region_label) %>%
-  select(-region_label)
-
-p_zoomed <- plot_image_level_fit_zoom(
-  # img_df = img_all |> dplyr::mutate(region = "All Survey Regions"),
-  img_df = img_df, # |> filter(region == "GB") |> mutate(region = "George's Banks"),
-  metrics_df = metrics[1:2,], # |> mutate(region = "George's Banks"),
-  model_name = model_name,
-  zoom_q=1,
-  plot_title = "True abundance vs. Σ calibrated detection probabilities per image",
-  model_label = expression("Dataset: 2022 - 2024, Detection Model: " * bold("YOLOv12"))
-)
-p_zoomed
-
-p_resid = pred$img %>%
-  mutate(residual = predicted_number - true_number) %>%
-  ggplot(aes(true_number, residual)) +
-  geom_point(alpha = 0.5) +
-  geom_hline(yintercept = 0, linetype = "dashed") +
-  labs(title = "Residuals vs True Count",
-       subtitle = "YOLOv12")
-p_resid
-# strong, but how to visualize after calibration?
-p_fn = ggplot(pred$img, aes(true_number, false_negative)) +
-  geom_point(alpha = 0.5) +
-  geom_smooth() +
-  labs(title = "False negatives vs true abundance")
-p_fn
-# for each break of p(detection), what is the average true positive count?
-pred$calib_df %>%
-  mutate(bin = cut(pred_p, breaks = seq(0,1,0.1))) %>%
-  group_by(bin) %>%
-  summarise(
-    observed = mean(y),
-    predicted = mean(pred_p)
-  ) %>%
-  mutate(
-    r2   = summary(stats::lm(observed ~ predicted))$adj.r.squared,
-  ) %>%
-  ggplot(aes(predicted, observed)) +
-  geom_point() +
-  geom_text(
-    aes(x = -Inf, y = Inf, label = paste0("R²=", round(r2, 2) ) ),
-    hjust = -0.5, vjust = 1.5,
-    inherit.aes = FALSE
-  ) +
-  geom_abline(slope = 1, intercept = 0) +
-  labs(title = "Calibration curve",
-       subtitle = "for each seq of p(detection), what is the average true positive count?")
-
-summary_df <- data.frame(
-  metric = c("True", "Raw detector", "Calibrated", "F1-cutoff"),
-  value  = c(
-    sum(pred$img$n_annotations, na.rm = TRUE),
-    sum(pred$calib_df$conf, na.rm = TRUE),
-    sum(pred$calib_df$pred_p, na.rm = TRUE),
-    sum(pred$img$predicted_f1_number, na.rm = TRUE)
+  
+  } else{
+    
+  gams <- fit_calibration_gams(
+    det_df = mod_data$det,
+    formula_gb = best_formula_cascade_gb,
+    formula_mab = best_formula_cascade_mab
   )
-)
+    
+  }
+  
+  if (mod_name == "Cascade R-CNN") mod_name <- gsub("\\s", "", mod_name)
+  saveRDS(gams, file = paste0("../data/processed/", mod_name, 
+                                       "_detgams_2226.rds"))
+  
+  # C. Test GAMs on Holdout Data
+  cat("Testing GAMs on holdout data...\n")
+  eval_results <- test_calibration_gams(
+    gams          = gams, 
+    det_df        = mod_data$det, 
+    img_df        = mod_data$img, 
+    f1_thresholds = f1_list
+  )
+  
+  if (mod_name == "Cascade R-CNN") mod_name <- gsub("\\s", "", mod_name)
+  saveRDS(eval_results, file = paste0("../data/processed/", mod_name, 
+                              "_deteval_2226.rds"))
+  
+  print(eval_results$metrics)
+  
+  # D. Generate and Save Diagnostics
+  cat("Generating and saving plots...\n")
+  plots <- generate_gam_plots(eval_res = eval_results, model_name = mod_name, dataset_label = "2022-2024, 2026")
+  
+  # Safe filename string (removes spaces/special characters)
+  safe_mod_name <- gsub(" |-", "", mod_name)
+  
+  ggsave(paste0("../figures/diag3/2226_", safe_mod_name, "_count_strat.png"), plot = plots$p_zoomed, width = 9, height = 5, bg = "white")
+  ggsave(paste0("../figures/diag3/2226_", safe_mod_name, "_resid_strat.png"), plot = plots$p_resid, width = 5, height = 4.5, bg = "white")
+  ggsave(paste0("../figures/diag3/2226_", safe_mod_name, "_fn_strat.png"), plot = plots$p_fn, width = 5, height = 4.5, bg = "white")
+  ggsave(paste0("../figures/ms_figures/2226_", safe_mod_name, "_fn_strat.png"), plot = plots$p_fn, width = 5, height = 4.5, bg = "white")
+  ggsave(paste0("../figures/diag3/2226_", safe_mod_name, "_sum_strat.png"), plot = plots$p_sum, width = 6, height = 5, bg = "white")
+}
 
-p_sum = ggplot(summary_df, aes(x = metric, y = value, fill = metric)) +
-  geom_col(width = 0.6) +
-  geom_hline(yintercept = summary_df$value[1], linetype = "dashed", color = "black") +
-  geom_text(aes(label = round(value, 0)), vjust = -0.5) +
-  theme_minimal() +
-  labs(
-    title = "Total scallop abundance",
-    subtitle = "YOLOv12",
-    x = "",
-    y = "Total count"
-  ) +
-  theme(legend.position = "none")
-p_sum
-
-save_cal(p_zoomed, id = paste("2224_",model_name, "_count_strat",sep=""), 
-         outdir = "../figures/diag2/", format = "png", width = 9)
-save_cal(p_resid, id = paste("2224_",model_name, "_resid_strat",sep=""), 
-         outdir = "../figures/diag2/", format = "png", width = 5, height = 4.5)
-save_cal(p_fn, id = paste("2224_",model_name, "_fn_strat",sep=""), 
-         outdir = "../figures/diag2/", format = "png", width = 5, height = 4.5)
-save_cal(p_sum, id = paste("2224_",model_name, "_sum_strat",sep=""), 
-         outdir = "../figures/diag2/", format = "png", width = 5, height = 4.5)
-
-
+cat("\nPipeline complete! All plots saved to ../figures/diag3/\n")

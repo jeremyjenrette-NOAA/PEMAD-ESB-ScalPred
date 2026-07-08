@@ -1,80 +1,71 @@
 library(dplyr)
-library(purrr)
-library(tibble)
-source("./datfunc.R")
-# read data
-#============================================================#
-# Cascade R-CNN 
-#============================================================#
-at_cas <- read.csv("../data/raw/2224scallop_viame_408180/eval/autotest2224_viame_cascade.csv") %>%
-  mutate(truedetect = if_else(truedetect == "True", TRUE, FALSE)) %>%
-  rename(spname = Spname) %>%
-  rename(imagename = Imagename)
+library(janitor)
+library(stringr)
 
-mt_cas <- read.csv("../data/raw/2224scallop_viame_408180/eval/mantest2224_viame_cascade.csv") %>%
-  rename(spname = Spname) %>%
-  rename(imagename = Imagename)
-
-#============================================================#
-# YOLO
-#============================================================#
-at <- read.csv("../data/raw/2224scallop_yolo12n_408179/eval/autotest2224_yolo12n.csv") %>%
-  mutate(truedetect = if_else(truedetect == "True", TRUE, FALSE))
-mt <- read.csv("../data/raw/2224scallop_yolo12n_408179/eval/mantest2224_yolo12n.csv")
-# meta = read.csv("../data/processed/metadata2224.csv")
-
-# read all tested images (not just detections)
-# same for Cascade and YOLO
-all_test_imgs = read.csv("../data/raw/2224scallop_yolo12n_408179/eval/val_images2224_yolo12n.csv") 
-
-# read master stratify dataframe + metadata
-dat_split = read.csv("../data/raw/dataset_split_2224.csv")
-
-dat_split <- dat_split %>%
-  rename(
-    # Imagename              = imagename,
-    altitude               = ALTIMETER_ALTITUDE_METER,
-    altitude2              = ALTIMETER_ALTITUDE2_METER,
-    stereo_altitude        = STEREO_ALTITUDE_METER,
-    backscatter            = FLUOROMETER_BACKSCATTER_NTU,
-    bottom_depth           = FATHOMETER_OCEAN_DEPTH_METER,
-    cdom                   = FLUOROMETER_CDOM,
-    chlorophyll            = FLUOROMETER_CHLOROPHYLL,
-    # field_of_view_sq_meter = FIELD_OF_VIEW_SQ_METER,
-    field_of_view_source   = FIELD_OF_VIEW_SOURCE,
-    heading                = VEHICLE_MAGNETIC_HEADING,
-    # latitude               = SHIP_LATITUDE,
-    # longitude              = SHIP_LONGITUDE,
-    # millimeter_per_pixel   = MILLIMETER_PER_PIXEL,
-    o2                     = CTD2_DISSOLVED_OXYGEN,
-    pitch                  = VEHICLE_PITCH_ANGLE,
-    roll                   = VEHICLE_ROLL_ANGLE,
-    s                      = CTD_SALINITY,
-    t                      = CTD_TEMPERATURE_CELSIUS,
-    fluorometer_signal     = FLUOROMETER_SIGNAL,
-    datetime               = image_timestamp,
-    v_depth                = CTD_VEHICLE_DEPTH_METER,
-    gear                   = GEAR,
-    cruise_id              = CRUISE_ID,
-    habcam_pk              = HABCAM_PK
-  ) %>%
+# ======================================================================
+# 1. Master Metadata Prep
+# ======================================================================
+meta <- read.csv("../data/raw/dataset_split_2226.csv") %>%
+  clean_names() %>%
   mutate(
-    bottom_depth = altitude + v_depth
+    image_id = str_remove(imagename, "\\.[A-Za-z0-9]+$"), 
+    region = if_else(longitude >= -71, "GB", "MAB") %>% factor(levels = c("MAB", "GB")),
+    # Robustly handle the boolean just in case pandas exported it as a string
+    is_test = as.logical(is_test)
   ) %>%
-  # mutate(
-  #   Imagename = basename(Imagename)
-  # ) %>%
-  distinct(imagename, .keep_all = TRUE)
+  distinct(image_id, .keep_all = TRUE)
 
+# ======================================================================
+# 2. Unified Processing Function
+# ======================================================================
+process_model <- function(det_csv_path, meta_df) {
+  
+  at <- read.csv(det_csv_path) %>%
+    clean_names() %>%
+    mutate(
+      image_id = str_remove(imagename, "\\.[A-Za-z0-9]+$"),
+      truedetect = if_else(tolower(truedetect) == "true", TRUE, FALSE),
+      spname = tolower(spname)
+    ) %>%
+    filter(spname == "scallop")
+  
+  # --- THE FIX: Isolate only the images used during evaluation ---
+  test_meta_df <- meta_df %>% filter(is_test == TRUE) %>%
+    select(-imagename)
+  
+  auto_counts <- at %>% count(image_id, name = "n_auto")
+  
+  img_df <- test_meta_df %>%
+    left_join(auto_counts, by = "image_id") %>%
+    mutate(
+      n_auto = replace_na(n_auto, 0L),
+      man_density = n_annotations / field_of_view_sq_meter,
+      auto_density = n_auto / field_of_view_sq_meter
+    )
+  
+  det_df <- at %>%
+    left_join(
+      test_meta_df,
+      by = "image_id"
+    )
+  
+  return(list(img = img_df, det = det_df))
+}
 
+# ======================================================================
+# 3. Process Models and Bundle
+# ======================================================================
+print("Processing YOLO...")
+yolo_data <- process_model("../data/raw/2226scallop_yolo12n_441288/eval/autotest2226_yolo12n.csv", meta)
 
-out <- build_detection_tables(mt = mt, at = at, meta = dat_split, all_test_imgs = all_test_imgs)
+print("Processing Cascade R-CNN...")
+cas_data <- process_model("../data/raw/2226scallop_viame_441305/autotest2226_viame_cascade.csv", meta)
 
-model_name <- "YOLOv12strat2224"
+# Rename them right here:
+model_results <- list(
+  `YOLOv12` = yolo_data,
+  `Cascade R-CNN` = cas_data
+)
 
-res <- structure_by_region(out, model_name, 
-                           region_lat_cutoff = 40, 
-                           save_rdata = TRUE)
-
-names(res)
-
+saveRDS(model_results, file = "../data/processed/eval_2226.rds")
+print("Success! Unified data saved.")

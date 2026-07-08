@@ -1,4 +1,4 @@
-at_yolo = read.csv("../data/raw/2224scallop_yolo12n_261070/eval/autotest2224_yolo12n.csv") 
+at_yolo = read.csv("../data/raw/model_output/2224scallop_yolo12n_261070/eval/autotest2224_yolo12n.csv") 
 # mt_yolo = read.csv("../data/raw/2224scallop_yolo12n_261070/eval/mantest2224_yolo12n.csv")
 yr2224 = rbind(
   read.csv("../../PEMAD-ESB-ScalTrain/data/raw/annotations_2022.csv"),
