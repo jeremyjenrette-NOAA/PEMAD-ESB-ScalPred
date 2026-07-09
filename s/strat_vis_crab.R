@@ -10,7 +10,7 @@ source("./gamfunc.R")
 # ======================================================================
 # 1. Load and Prepare Plotting Data
 # ======================================================================
-dat_split <- read.csv("../data/raw/dataset_split_2226.csv")
+dat_split <- read.csv("../data/raw/dataset_split_crab.csv")
 
 if(!"transect_group" %in% names(dat_split)) {
   dat_split <- dat_split %>% 
@@ -74,7 +74,7 @@ create_region_map <- function(target_region, title_text, tag_text, show_legend =
     ) +
     geom_point(
       data = plot_data,
-      aes(x = longitude, y = latitude, color = split_stage, size = pmin(n_annotations, 15)),
+      aes(x = longitude, y = latitude, color = split_stage, size = pmin(total_annotations, 15)),
       shape = 15, alpha = 0.75
     ) +
     coord_quickmap(
@@ -121,7 +121,7 @@ p_map_gb  <- create_region_map("Georges Bank", "Georges Bank", tag_text = "B", s
 # ======================================================================
 p_density <- ggplot(
   dat_plot,
-  aes(x = split_stage, y = n_annotations, fill = split_stage)
+  aes(x = split_stage, y = total_annotations, fill = split_stage)
 ) +
   geom_violin(alpha = 0.7, trim = TRUE) +
   geom_boxplot(width = 0.12, outlier.alpha = 0.15) +
@@ -203,7 +203,7 @@ bottom_row <- p_density + p_overview + plot_layout(widths = c(1.4, 1.6))
 # Adjust 3: Optimized row heights (0.5 for row 2 safely eliminates the GB title whitespace gap)
 combined_manuscript_plot <- row1 / p_map_gb / bottom_row + 
   plot_layout(heights = c(1.5, 1, 1.9))
-
+combined_manuscript_plot
 # Export file as requested
-ggsave(combined_manuscript_plot, filename = "../figures/ms_figures/2226_spatial_strat_final.pdf", 
+ggsave(combined_manuscript_plot, filename = "../figures/diag_crab1/2426_spatial_strat_final.pdf",
        width = 14, height = 15)

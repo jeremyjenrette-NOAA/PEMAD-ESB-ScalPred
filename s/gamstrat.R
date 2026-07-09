@@ -6,7 +6,7 @@ source("./procfunc.R")
 # ======================================================================
 # 1. Load Data
 # ======================================================================
-models <- readRDS("../data/processed/eval_2226.rds")
+models <- readRDS("../data/processed/crab_eval_2426.rds")
 
 # Standardize names if not already done in the RDS builder
 names(models)[names(models) == "YOLO"] <- "YOLOv12"
@@ -73,10 +73,10 @@ print(selection_results_cascade_MAB)
 
 # Pick the best formulas based on the selection results! 
 # (You could automate this, but it is safer to manually inspect the AIC table and define them here)
-best_formula_yolo_gb  <- candidate_forms$M15_All_te 
+best_formula_yolo_gb  <- candidate_forms$M15_All_te
 best_formula_yolo_mab <- candidate_forms$M15_All_te
-best_formula_cascade_gb  <- candidate_forms$M14_PB_Temp 
-best_formula_cascade_mab <- candidate_forms$M14_PB_Temp
+best_formula_cascade_gb  <- candidate_forms$M15_All_te
+best_formula_cascade_mab <- candidate_forms$M15_All_te
 
 model_names_to_run <- c("YOLOv12", "Cascade R-CNN")
 
@@ -133,7 +133,7 @@ for (mod_name in model_names_to_run) {
   
   if (mod_name == "Cascade R-CNN") mod_name <- gsub("\\s", "", mod_name)
   saveRDS(gams, file = paste0("../data/processed/", mod_name, 
-                                       "_detgams_2226.rds"))
+                                       "_crab_detgams_2426.rds")) # crab
   
   # C. Test GAMs on Holdout Data
   cat("Testing GAMs on holdout data...\n")
@@ -146,22 +146,22 @@ for (mod_name in model_names_to_run) {
   
   if (mod_name == "Cascade R-CNN") mod_name <- gsub("\\s", "", mod_name)
   saveRDS(eval_results, file = paste0("../data/processed/", mod_name, 
-                              "_deteval_2226.rds"))
+                              "_crab_deteval_2426.rds")) # crab
   
   print(eval_results$metrics)
   
   # D. Generate and Save Diagnostics
   cat("Generating and saving plots...\n")
-  plots <- generate_gam_plots(eval_res = eval_results, model_name = mod_name, dataset_label = "2022-2024, 2026")
+  plots <- generate_gam_plots(eval_res = eval_results, model_name = mod_name, dataset_label = "2024, 2026")
   
   # Safe filename string (removes spaces/special characters)
   safe_mod_name <- gsub(" |-", "", mod_name)
   
-  ggsave(paste0("../figures/diag3/2226_", safe_mod_name, "_count_strat.png"), plot = plots$p_zoomed, width = 9, height = 5, bg = "white")
-  ggsave(paste0("../figures/diag3/2226_", safe_mod_name, "_resid_strat.png"), plot = plots$p_resid, width = 5, height = 4.5, bg = "white")
-  ggsave(paste0("../figures/diag3/2226_", safe_mod_name, "_fn_strat.png"), plot = plots$p_fn, width = 5, height = 4.5, bg = "white")
-  ggsave(paste0("../figures/ms_figures/2226_", safe_mod_name, "_fn_strat.png"), plot = plots$p_fn, width = 5, height = 4.5, bg = "white")
-  ggsave(paste0("../figures/diag3/2226_", safe_mod_name, "_sum_strat.png"), plot = plots$p_sum, width = 6, height = 5, bg = "white")
+  ggsave(paste0("../figures/diag_crab1/2426_", safe_mod_name, "_count_strat.png"), plot = plots$p_zoomed, width = 9, height = 5, bg = "white")
+  ggsave(paste0("../figures/diag_crab1/2426_", safe_mod_name, "_resid_strat.png"), plot = plots$p_resid, width = 5, height = 4.5, bg = "white")
+  ggsave(paste0("../figures/diag_crab1/2426_", safe_mod_name, "_fn_strat.png"), plot = plots$p_fn, width = 5, height = 4.5, bg = "white")
+  # ggsave(paste0("../figures/ms_figures/2226_", safe_mod_name, "_fn_strat.png"), plot = plots$p_fn, width = 5, height = 4.5, bg = "white")
+  ggsave(paste0("../figures/diag_crab1/2426_", safe_mod_name, "_sum_strat.png"), plot = plots$p_sum, width = 6, height = 5, bg = "white")
 }
 
-cat("\nPipeline complete! All plots saved to ../figures/diag3/\n")
+cat("\nPipeline complete! All plots saved to ../figures/diag_crab1/\n")

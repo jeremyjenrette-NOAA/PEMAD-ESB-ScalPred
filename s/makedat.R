@@ -5,8 +5,9 @@ library(stringr)
 # ======================================================================
 # 1. Master Metadata Prep
 # ======================================================================
-meta <- read.csv("../data/raw/dataset_split_2226.csv") %>%
+meta <- read.csv("../data/raw/dataset_split_crab.csv") %>%
   clean_names() %>%
+  rename(n_annotations = total_annotations) %>% # for crab data
   mutate(
     image_id = str_remove(imagename, "\\.[A-Za-z0-9]+$"), 
     region = if_else(longitude >= -71, "GB", "MAB") %>% factor(levels = c("MAB", "GB")),
@@ -27,7 +28,7 @@ process_model <- function(det_csv_path, meta_df) {
       truedetect = if_else(tolower(truedetect) == "true", TRUE, FALSE),
       spname = tolower(spname)
     ) %>%
-    filter(spname == "scallop")
+    filter(spname == "crab") # crab or scallop
   
   # --- THE FIX: Isolate only the images used during evaluation ---
   test_meta_df <- meta_df %>% filter(is_test == TRUE) %>%
@@ -56,10 +57,10 @@ process_model <- function(det_csv_path, meta_df) {
 # 3. Process Models and Bundle
 # ======================================================================
 print("Processing YOLO...")
-yolo_data <- process_model("../data/raw/2226scallop_yolo12n_441288/eval/autotest2226_yolo12n.csv", meta)
+yolo_data <- process_model("../data/raw/crab_eval_yolov12/autotest.csv", meta)
 
 print("Processing Cascade R-CNN...")
-cas_data <- process_model("../data/raw/2226scallop_viame_441305/autotest2226_viame_cascade.csv", meta)
+cas_data <- process_model("../data/raw/crab_eval_cascade/autotest2426_viame_cascade.csv", meta)
 
 # Rename them right here:
 model_results <- list(
@@ -67,5 +68,5 @@ model_results <- list(
   `Cascade R-CNN` = cas_data
 )
 
-saveRDS(model_results, file = "../data/processed/eval_2226.rds")
+saveRDS(model_results, file = "../data/processed/crab_eval_2426.rds")
 print("Success! Unified data saved.")

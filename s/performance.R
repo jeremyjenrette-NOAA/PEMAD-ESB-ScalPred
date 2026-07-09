@@ -7,10 +7,10 @@ source("./procfunc.R")
 # ============================================================#
 # 1. Load Unified Data and Evaluate
 # ============================================================#
-models <- readRDS("../data/processed/eval_2226.rds")
+models <- readRDS("../data/processed/crab_eval_2426.rds")
 
 # Toggle 'stratify_region = FALSE' if you want pooled overall performance
-out_pr <- evaluate_pr_models(models, stratify_region = TRUE, conf_grid = seq(0, 1, by = 0.0005))
+out_pr <- evaluate_pr_models(models, stratify_region = FALSE, conf_grid = seq(0, 1, by = 0.0005))
 
 pr_all <- out_pr$pr_all
 p_pr   <- out_pr$p_pr
@@ -149,7 +149,7 @@ combined_2panel <- (top_row) +
 # 7. Save
 # ============================================================#
 ggsave(
-  filename = "../figures/ms_figures/2226_model_performance_summary.pdf", 
+  filename = "../figures/diag_crab1/2426_crab_performance.pdf", 
   plot = combined_2panel, 
   width = 9, 
   height = 5, 

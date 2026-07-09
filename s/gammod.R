@@ -6,14 +6,15 @@ library(mgcv)
 source("./gamfunc.R")
 
 # 1. Load your master metadata and previously evaluated model results
-meta <- read.csv("../data/raw/dataset_split_2226.csv") %>% 
+meta <- read.csv("../data/raw/dataset_split_crab.csv") %>% 
   janitor::clean_names() %>%
+  rename(n_annotations = total_annotations) %>% # crab
   mutate(image_id = stringr::str_remove(imagename, "\\.[A-Za-z0-9]+$")) %>%
   distinct(image_id, .keep_all = TRUE)
 
 # (Assuming yolo_eval and cas_eval were saved from your gamstrat.R output)
-yolo_eval <- readRDS("../data/processed/YOLOv12_deteval_2226.rds")
-cas_eval  <- readRDS("../data/processed/CascadeR-CNN_deteval_2226.rds")
+yolo_eval <- readRDS("../data/processed/YOLOv12_crab_deteval_2426.rds")
+cas_eval  <- readRDS("../data/processed/CascadeR-CNN_crab_deteval_2426.rds")
 
 # 2. Build Synergistic Dataset
 img_combined <- build_synergy_dataset(yolo_eval, cas_eval, meta) 
@@ -56,8 +57,8 @@ print(compare_image_gams(img_combined, image_candidate_forms, "MAB"))
 
 # Assign the winners dynamically based on your tests!
 # M09_MeanDiff best for total count error
-best_syn_gb  <- image_candidate_forms$M09_MeanCasDiff
-best_syn_mab <- image_candidate_forms$M09_MeanCasDiff
+best_syn_gb  <- image_candidate_forms$M12_Tensor
+best_syn_mab <- image_candidate_forms$M12_Tensor
 # ======================================================================
 # 3. Train and Test Final Synergistic Model
 # ======================================================================
@@ -156,7 +157,7 @@ row2 <- p[[5]] | p[[6]] | p[[7]] | p[[8]]
 row3 <- p[[9]] | p[[10]]| p[[11]]| p[[12]]
 
 # Create dynamic subcaption string
-caption_string <- sprintf("Datasets: 2022-2024, 2026 | Models Evaluated: YOLOv12, Cascade R-CNN, Synergistic GAM\nHoldout Test Images: Georges Bank (n = %d), Mid-Atlantic Bight (n = %d)\nScallop Abundance: Georges Bank (n = %d), Mid-Atlantic Bight (n = %d)", n_gb, n_mab, n_gb_abundance, n_mab_abundance)
+caption_string <- sprintf("Datasets: 2024, 2026 | Models Evaluated: YOLOv12, Cascade R-CNN, Synergistic GAM\nHoldout Test Images: Georges Bank (n = %d), Mid-Atlantic Bight (n = %d)\nCrab Abundance: Georges Bank (n = %d), Mid-Atlantic Bight (n = %d)", n_gb, n_mab, n_gb_abundance, n_mab_abundance)
 
 # Stitch it all together: Header row on top, followed by the 3 data rows
 final_plot <- (header_row / row1 / row2 / row3) + 
@@ -174,7 +175,7 @@ print(final_plot)
 
 # Save the high-resolution figure
 ggsave(
-  filename = "../figures/ms_figures/2226_12panel_calibration_summary.png",
+  filename = "../figures/diag_crab1/2426_crab_12panel_calibration_summary.png",
   plot = final_plot,
   width = 13,
   height = 12,
@@ -246,7 +247,7 @@ ggplot2::update_geom_defaults("text", list(family = "sans"))
 p_sum_final <- ggplot(sum_df, aes(x = Method, y = Value, fill = Method)) +
   geom_col(width = 0.7, color = "black") +
   geom_hline(yintercept = true_val, linetype = "dashed", color = "black", linewidth = 1.0) +
-  geom_text(aes(label = Label_Text), y = 10000, 
+  geom_text(aes(label = Label_Text), y = 900, 
             vjust = 0, fontface = "bold", size = 3.5) +
   scale_fill_manual(values = c(
     "True Abundance"  = "grey40", 
@@ -269,5 +270,5 @@ p_sum_final <- ggplot(sum_df, aes(x = Method, y = Value, fill = Method)) +
   )
 
 # Save the final render
-ggsave("../figures/ms_figures/2226_final_abundance_summary.png", 
+ggsave("../figures/diag_crab1/2426_crab_final_abundance_summary.png", 
        plot = p_sum_final, width = 8, height = 6, dpi = 300)
