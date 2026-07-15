@@ -6,13 +6,17 @@ library(stringr)
 # ======================================================================
 # 1. Master Metadata Prep
 # ======================================================================
-meta <- read.csv("../data/raw/dataset_split_crab.csv") %>%
+meta <- read.csv("../data/raw/dataset_split_crab_multiclass.csv") %>%
   clean_names() %>%
   rename(n_annotations = total_annotations) %>% 
   mutate(
     image_id = str_remove(imagename, "\\.[A-Za-z0-9]+$"), 
     region = if_else(longitude >= -71, "GB", "MAB") %>% factor(levels = c("MAB", "GB")),
-    is_test = as.logical(is_test)
+    
+    # --- Robust Boolean Coercion for Python/Pandas Exported Strings ---
+    is_empty = as.logical(as.character(is_empty)),
+    is_train = as.logical(as.character(is_train)),
+    is_test  = as.logical(as.character(is_test))
   ) %>%
   distinct(image_id, .keep_all = TRUE)
 
@@ -20,9 +24,6 @@ meta <- read.csv("../data/raw/dataset_split_crab.csv") %>%
 # 2. Unified Processing Function
 # ======================================================================
 process_model <- function(det_csv_path, meta_df, dets_df) {
-  
-  # Ensure ground-truth names match expected lowercase formats
-  dets_clean <- dets_df %>% clean_names()
   
   raw_at <- read.csv(det_csv_path)
   
@@ -36,82 +37,45 @@ process_model <- function(det_csv_path, meta_df, dets_df) {
     clean_names() %>%
     mutate(
       image_id = str_remove(imagename, "\\.[A-Za-z0-9]+$"),
-      truedetect = if_else(tolower(truedetect) == "true", TRUE, FALSE),
+      # --- Robust Boolean Coercion for YOLO/Cascade Predictions ---
+      truedetect = as.logical(as.character(truedetect)),
       spname = tolower(spname)
     ) %>%
-    filter(spname == "crab") 
+    # Filter for any of our three target crab species (using valid R syntax)
+    filter(spname %in% c("jonah_crab", "rock_crab", "cancer_sp"))
   
-  # --- Match True Positives to 'dets' via IoU to recover original labels ---
-  tp_dets <- at %>% filter(truedetect == TRUE)
+  # --- Isolate only the images used during evaluation ---
+  test_meta_df <- meta_df %>% 
+    filter(is_test == TRUE) %>%
+    select(-imagename)
   
-  if (nrow(tp_dets) > 0) {
-    tp_matched <- tp_dets %>%
-      inner_join(
-        dets_clean, 
-        by = "imagename", 
-        suffix = c("_det", "_gt"), 
-        relationship = "many-to-many"
-      ) %>%
-      mutate(
-        xa = pmax(tlx_det, tlx_gt),
-        ya = pmax(tly_det, tly_gt),
-        xb = pmin(brx_det, brx_gt),
-        yb = pmin(bry_det, bry_gt),
-        
-        inter_area = pmax(0, xb - xa) * pmax(0, yb - ya),
-        det_area = (brx_det - tlx_det) * (bry_det - tly_det),
-        gt_area = (brx_gt - tlx_gt) * (bry_gt - tly_gt),
-        
-        iou = inter_area / (det_area + gt_area - inter_area)
-      ) %>%
-      group_by(detectid) %>%
-      slice_max(iou, n = 1, with_ties = FALSE) %>%
-      ungroup() %>%
-      select(detectid, original_label = label)
-    
-    at <- at %>% left_join(tp_matched, by = "detectid")
-  } else {
-    at <- at %>% mutate(original_label = NA_character_)
-  }
+  # Compute overall automated detection counts per image
+  auto_total <- at %>% count(image_id, name = "n_auto")
   
-  # --- NEW: Compute ground truth species counts per image ---
-  gt_counts <- dets_clean %>%
-    mutate(
-      image_id = str_remove(imagename, "\\.[A-Za-z0-9]+$"),
-      species_cat = case_when(
-        label == "rock_crab" ~ "n_rock_crab",
-        label == "jonah_crab" ~ "n_jonah_crab",
-        label %in% c("cancer_sp.", "cancer_sp") ~ "n_cancer_sp",
-        TRUE ~ "n_other"
-      )
-    ) %>%
+  # Compute species-specific automated detection counts per image
+  auto_species <- at %>%
+    mutate(species_cat = paste0("n_auto_", spname)) %>%
     count(image_id, species_cat) %>%
     pivot_wider(names_from = species_cat, values_from = n, values_fill = 0L)
   
-  # Safely ensure all 4 target columns exist even if a category is missing entirely
-  target_cols <- c("n_rock_crab", "n_jonah_crab", "n_cancer_sp", "n_other")
-  for (col in target_cols) {
-    if (!col %in% names(gt_counts)) gt_counts[[col]] <- 0L
+  # Structural safeguard: Ensure all target auto columns exist even if unpredicted
+  auto_cols <- c("n_auto_jonah_crab", "n_auto_rock_crab", "n_auto_cancer_sp")
+  for (col in auto_cols) {
+    if (!col %in% names(auto_species)) auto_species[[col]] <- 0L
   }
   
-  # --- Isolate only the images used during evaluation ---
-  test_meta_df <- meta_df %>% filter(is_test == TRUE) %>%
-    select(-imagename)
-  
-  auto_counts <- at %>% count(image_id, name = "n_auto")
-  
-  # Combine counts into the image-level summary
+  # Combine counts into the comprehensive image-level summary
   img_df <- test_meta_df %>%
-    left_join(auto_counts, by = "image_id") %>%
-    left_join(gt_counts, by = "image_id") %>%
+    left_join(auto_total, by = "image_id") %>%
+    left_join(auto_species, by = "image_id") %>%
     mutate(
       n_auto = replace_na(n_auto, 0L),
-      # Efficiently replace NAs with 0 across all species count columns
-      across(all_of(target_cols), ~ replace_na(.x, 0L)),
+      across(all_of(auto_cols), ~ replace_na(.x, 0L)),
       man_density = n_annotations / field_of_view_sq_meter,
       auto_density = n_auto / field_of_view_sq_meter
     )
   
+  # Join metadata directly to the detection-level frame
   det_df <- at %>%
     left_join(test_meta_df, by = "image_id")
   
@@ -122,15 +86,16 @@ process_model <- function(det_csv_path, meta_df, dets_df) {
 # 3. Process Models and Bundle
 # ======================================================================
 print("Processing YOLO...")
-yolo_data <- process_model("../data/raw/crab_eval_yolov12/autotest.csv", meta, dets)
+yolo_data <- process_model("../data/raw/crab_eval_yolov12_multi/autotest2426_yolo12n.csv", meta, dets)
 
 print("Processing Cascade R-CNN...")
-cas_data <- process_model("../data/raw/crab_eval_cascade/autotest2426_viame_cascade.csv", meta, dets)
+cas_data <- process_model("../data/raw/crab_eval_cascade_multi/autotest2426_viame_cascade.csv", meta, dets)
 
+# Combine into cohesive nested analytical lists
 model_results <- list(
   `YOLOv12` = yolo_data,
   `Cascade R-CNN` = cas_data
 )
 
-saveRDS(model_results, file = "../data/processed/crab_eval_2426.rds")
-print("Success! Unified data saved with image-level species profiles.")
+saveRDS(model_results, file = "../data/processed/crab_evalmulti_2426.rds")
+print("Success! Multi-class data structures successfully unified with standardized logicals.")

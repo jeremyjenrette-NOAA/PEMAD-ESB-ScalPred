@@ -1,310 +1,162 @@
-library(maps)
 library(dplyr)
+library(tidyr)
 library(ggplot2)
-library(forcats)
-library(scales)
 library(patchwork)
-library(marmap)
-source("./gamfunc.R")
 
 # ======================================================================
 # 1. Load and Prepare Plotting Data
 # ======================================================================
-dat_split <- read.csv("../data/raw/dataset_split_crab.csv")
+dat_split <- read.csv("../data/raw/dataset_split_crab_multiclass.csv")
 
-if(!"transect_group" %in% names(dat_split)) {
-  dat_split <- dat_split %>% 
-    mutate(transect_group = sub("_block_.*", "", transect_block_id))
-}
-
-if(!"transect_position" %in% names(dat_split)) {
-  dat_split <- dat_split %>%
-    group_by(transect_group) %>%
-    mutate(transect_position = row_number() - 1) %>%
-    ungroup()
-}
-
-dat_plot <- dat_split %>%
+# Robustly filter for training data and sanitize logical/character flags
+train_data <- dat_split %>%
+  filter(as.logical(as.character(is_train)) == TRUE) %>%
   mutate(
-    split_stage = case_when(
-      dataset == "train" ~ "Detection train",
-      dataset == "test_GAM_train" ~ "Calibration train",
-      dataset == "test_GAM_test" ~ "Calibration test",
-      TRUE ~ "Other"
-    ),
-    region = ifelse(longitude >= -71, "Georges Bank", "Mid-Atlantic Bight"),
-    year = as.factor(year)
-  ) %>%
-  filter(!is.na(transect_group), !is.na(transect_position))
-
-# --- Define a Common Theme ---
-my_theme <- theme(
-  plot.title = element_text(hjust = 0.5, margin = margin(b = 13), size = 21), 
-  panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5), 
-  strip.background = element_rect(color = "black", fill = "grey90", linewidth = 0.5), 
-  
-  plot.tag = element_text(size = 21, face = "plain"),
-  
-  # c(x, y) coordinates from 0 to 1 relative to the entire plot area
-  # Changing x from 0.02 to 0.08 moves it a bit to the right
-  plot.tag.position = c(0.045, 0.97), 
-  
-  plot.margin = margin(t = 4, r = 5, b = 6, l = 4) 
-)
-
-split_colors <- c(
-  "Detection train" = "black", 
-  "Calibration train" = "#2C7FB8", 
-  "Calibration test" = "#D95F0E", 
-  "Other" = "grey80"
-)
-
-world <- map_data("world")
-
-# ======================================================================
-# 2. Regional Geospatial Maps (Panels A & B)
-# ======================================================================
-create_region_map <- function(target_region, title_text, tag_text, show_legend = TRUE) {
-  plot_data <- dat_plot %>% filter(region == target_region)
-  
-  p <- ggplot() +
-    geom_polygon(
-      data = world, aes(x = long, y = lat, group = group),
-      fill = "grey85", color = "grey60", linewidth = 0.2
-    ) +
-    geom_point(
-      data = plot_data,
-      aes(x = longitude, y = latitude, color = split_stage, size = pmin(total_annotations, 15)),
-      shape = 15, alpha = 0.75
-    ) +
-    coord_quickmap(
-      xlim = range(plot_data$longitude, na.rm = TRUE) + c(-0.2, 0.2),
-      ylim = range(plot_data$latitude, na.rm = TRUE) + c(-0.2, 0.2)
-    ) +
-    scale_size_continuous(name = "Manual annotations\n(max = 15+)", range = c(0.6, 3.8)) +
-    scale_color_manual(values = split_colors) +
-    facet_wrap(~ year, nrow = 1) + 
-    labs(title = title_text, x = "Longitude", y = "Latitude", color = "Dataset", tag = tag_text) +
-    theme_minimal(base_size = 12) +
-    theme(
-      strip.text = element_text(face = "bold", margin = margin(t=4, b=4), size = 16),
-      axis.text.x = element_text(angle = 45, hjust = 1),
-      legend.margin = margin(l = 10, r = 0),
-      legend.box.margin = margin(0, 0, 0, 0)
-    ) +
-    my_theme
-  
-  if(!show_legend) {
-    p <- p + theme(legend.position = "none")
-  } else {
-    # Adjust 2: Significantly enlarge the legend text, keys, and symbols
-    p <- p + theme(
-      legend.title = element_text(size = 20, face = "plain"),
-      legend.text = element_text(size = 18),
-      legend.key.size = unit(0.9, "cm"),
-      legend.spacing.y = unit(0.4, "cm")
-    ) +
-      guides(
-        color = guide_legend(order = 1, override.aes = list(size = 8)),
-        size = guide_legend(order = 2)
-      )
-  }
-  
-  return(p)
-}
-
-p_map_mab <- create_region_map("Mid-Atlantic Bight", "Mid-Atlantic Bight", tag_text = "A", show_legend = TRUE)
-p_map_gb  <- create_region_map("Georges Bank", "Georges Bank", tag_text = "B", show_legend = FALSE)
-
-# ======================================================================
-# 3. Density Violin Plot (Panel C)
-# ======================================================================
-p_density <- ggplot(
-  dat_plot,
-  aes(x = split_stage, y = total_annotations, fill = split_stage)
-) +
-  geom_violin(alpha = 0.7, trim = TRUE) +
-  geom_boxplot(width = 0.12, outlier.alpha = 0.15) +
-  scale_y_continuous(
-    trans = "pseudo_log",
-    breaks = c(0, 1, 2, 5, 10, 25, 50, 100, 250)
-  ) +
-  scale_fill_manual(
-    values = c(
-      "Detection train" = "#4D4D4D",
-      "Calibration train"  = "#2C7FB8",
-      "Calibration test"   = "#D95F0E",
-      "Other"      = "grey80"
-    )
-  ) +
-  labs(
-    title = "Scallop density across datasets",
-    x = "",
-    y = "Annotations per image",
-    tag = "C"
-  ) +
-  theme_minimal(base_size = 12) +
-  theme(legend.position = "none") +
-  my_theme
-
-# ======================================================================
-# 4. High-Detail Bathymetric Overview Map (Panel D)
-# ======================================================================
-states <- map_data("state") 
-
-bathy_data <- getNOAA.bathy(lon1 = -78, lon2 = -64, lat1 = 36, lat2 = 44, resolution = 1, keep = TRUE)
-bathy_df <- fortify.bathy(bathy_data)
-
-gb_bounds <- dat_plot %>% filter(region == "Georges Bank") %>%
-  summarize(xmin = min(longitude, na.rm=T) - 0.2, xmax = max(longitude, na.rm=T) + 0.2,
-            ymin = min(latitude, na.rm=T) - 0.2, ymax = max(latitude, na.rm=T) + 0.2)
-
-mab_bounds <- dat_plot %>% filter(region == "Mid-Atlantic Bight") %>%
-  summarize(xmin = min(longitude, na.rm=T) - 0.2, xmax = max(longitude, na.rm=T) + 0.2,
-            ymin = min(latitude, na.rm=T) - 0.2, ymax = max(latitude, na.rm=T) + 0.2)
-
-p_overview <- ggplot() +
-  geom_raster(data = bathy_df %>% filter(z <= 0), aes(x = x, y = y, fill = z)) +
-  scale_fill_gradientn(
-    colors = c("#08306B", "#2171B5", "#6BAED6", "#C6DBEF", "#E0F3F8"),
-    values = scales::rescale(c(-4000, -2000, -500, -100, 0)),
-    guide = "none" 
-  ) +
-  geom_contour(data = bathy_df, aes(x = x, y = y, z = z), 
-               breaks = c(-50, -200, -500, -1000, -2000), color = "white", alpha = 0.3, linewidth = 0.2) +
-  geom_contour(data = bathy_df, aes(x = x, y = y, z = z), 
-               breaks = -100, color = "#08519C", linewidth = 0.4, alpha = 0.8) +
-  geom_polygon(data = world, aes(x = long, y = lat, group = group), fill = "grey85", color = NA) +
-  geom_polygon(data = states, aes(x = long, y = lat, group = group), fill = NA, color = "grey50", linewidth = 0.2) +
-  geom_polygon(data = world, aes(x = long, y = lat, group = group), fill = NA, color = "grey40", linewidth = 0.4) + 
-  geom_rect(data = gb_bounds, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax), color = "red", fill = NA, linewidth = 0.5) +
-  geom_rect(data = mab_bounds, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax), color = "red", fill = NA, linewidth = 0.5) +
-  annotate("text", x = gb_bounds$xmin + 0.5, y = gb_bounds$ymax + 0.4, label = "Georges Bank", color = "red", size = 6, fontface = "plain", hjust = 0) +
-  annotate("text", x = mab_bounds$xmin + 0.5, y = mab_bounds$ymin - 0.4, label = "Mid-Atlantic Bight", color = "red", size = 6, fontface = "plain", hjust = 0) +
-  coord_quickmap(xlim = c(-78, -64), ylim = c(36, 44), expand = FALSE) +
-  labs(x = "", y = "", tag = "D") +
-  theme_minimal(base_size = 12) +
-  ggtitle("Study Regions") +
-  theme(
-    panel.grid = element_blank(), 
-    axis.text = element_blank(), 
-    axis.title = element_blank()
-  ) +
-  my_theme
-
-# ======================================================================
-# 5. Final Patchwork Assembly and Output Save
-# ======================================================================
-# Adjust 2: Pair Panel A with an empty spacer to pull it and its legend to the left
-row1 <- p_map_mab + plot_spacer() + plot_layout(widths = c(3.2, 0.25))
-
-bottom_row <- p_density + p_overview + plot_layout(widths = c(1.4, 1.6))
-
-# Adjust 3: Optimized row heights (0.5 for row 2 safely eliminates the GB title whitespace gap)
-combined_manuscript_plot <- row1 / p_map_gb / bottom_row + 
-  plot_layout(heights = c(1.5, 1, 1.9))
-combined_manuscript_plot
-# Export file as requested
-ggsave(combined_manuscript_plot, filename = "../figures/diag_crab1/2426_spatial_strat_final.pdf",
-       width = 14, height = 15)
-ggsave(combined_manuscript_plot, filename = "../figures/diag_crab1/2426_spatial_strat_final.png",
-       width = 14, height = 15)
-
-############
-
-dat_plot <- dat_split %>%
-  rename(n_annotations = total_annotations) %>%
-  mutate(
-    # Directly map our new dataset column to your plot labels
-    split_stage = case_when(
-      dataset == "train" ~ "Detection train",
-      dataset == "test_GAM_train" ~ "Calibration train",
-      dataset == "test_GAM_test" ~ "Calibration test",
-      TRUE ~ "Other"
-    ),
-    density_class = case_when(
-      n_annotations == 0 ~ "0 crabs",
-      n_annotations == 1 ~ "1 crabs",
-      n_annotations == 2 ~ "2 crabs",
-      n_annotations > 2 ~ ">2 crabs",
-      TRUE ~ NA_character_
-    ),
-    transect_group = as.factor(transect_group),
-    transect_block_id = as.factor(transect_block_id)
-  ) %>%
-  filter(!is.na(transect_group), !is.na(transect_position))
-
-# ======================================================================
-# 3. Transect Block Plot (p_blocks)
-# ======================================================================
-p_blocks <- ggplot(
-  dat_plot,
-  aes(
-    x = transect_position,
-    y = fct_reorder(transect_group, as.numeric(transect_group)),
-    fill = split_stage
-  )
-) +
-  geom_tile(
-    aes(alpha = pmin(n_annotations, 15)),
-    height = 0.8,
-    width = 0.95
-  ) +
-  scale_alpha_continuous(
-    name = "Manual annotations\n(max = 15+)",
-    range = c(0.4, 1)
-  ) +
-  scale_fill_manual(
-    values = c(
-      "Detection train" = "black",
-      "Calibration train"  = "#2C7FB8",
-      "Calibration test"   = "#D95F0E",
-      "Other"      = "grey80"
-    )
-  ) +
-  labs(
-    title = "Transect-block stratification of annotated HabCam images",
-    subtitle = "1 out of every 50 images annotated",
-    x = "Image position within transect",
-    y = "Transect",
-    fill = "Dataset"
-  ) +
-  theme_minimal(base_size = 15) +
-  theme(
-    panel.grid = element_blank(),
-    axis.text.y = element_text(size = 7),
-    legend.position = "right"
+    is_empty = as.logical(as.character(is_empty)),
+    year     = factor(year)
   )
 
-print(p_blocks)
+# Isolate Empty Background images
+empties <- train_data %>%
+  filter(is_empty == TRUE) %>%
+  mutate(label = "Empty Background")
 
-ggsave(p_blocks, filename = "../figures/diag_crab1/2426_crab_strat_block.pdf", 
-       width = 13, height = 8)
+# Isolate Positive Detections and pivot to capture mixed images accurately
+positives <- train_data %>%
+  filter(is_empty == FALSE) %>%
+  pivot_longer(
+    cols = c(n_jonah_crab, n_rock_crab, n_cancer_sp),
+    names_to = "species_col",
+    values_to = "count"
+  ) %>%
+  filter(count > 0) %>%
+  mutate(label = case_when(
+    species_col == "n_jonah_crab" ~ "Jonah Crab",
+    species_col == "n_rock_crab"  ~ "Rock Crab",
+    species_col == "n_cancer_sp"  ~ "Cancer sp.",
+    TRUE ~ "Other"
+  ))
 
-############
+# Combine back into a clean, factor-ordered plotting frame
+plot_data <- bind_rows(empties, positives) %>%
+  mutate(label = factor(label, levels = c("Jonah Crab", "Rock Crab", "Cancer sp.", "Empty Background")))
 
-dets = read.csv("../data/raw/groundtruth2426.csv")
+# Colorblind-friendly, high-contrast palette definition
+class_colors <- c(
+  "Jonah Crab"       = "#E69F00",  # Orange
+  "Rock Crab"        = "#56B4E9",  # Sky Blue
+  "Cancer sp."       = "#009E73",  # Bluish Green
+  "Empty Background" = "#999999"   # Slate Grey
+)
 
-# 1. Ensure 'year' is treated as a discrete factor for proper grouping
-dets$year <- as.factor(dets$year)
-
-# 2. Create a grouped bar chart
-label_sum = ggplot(dets, aes(y = label, fill = year)) +
-  geom_bar(position = position_dodge(preserve = "single"), color = "black", alpha = 0.8) +
-  scale_fill_viridis_d(option = "plasma", end = 0.8) + # Clean, colorblind-friendly palette
+# ======================================================================
+# 2. Panel A: Spatiotemporal Distribution Map
+# ======================================================================
+p_space <- ggplot(plot_data, aes(x = longitude, y = latitude, color = label)) +
+  geom_point(alpha = 0.5, size = 1.8, stroke = 0) +
+  facet_wrap(~ year, ncol = 1) +
+  scale_color_manual(values = class_colors) +
   labs(
-    title = "Crab Annotation Labels",
-    x = "Count (Number of Annotations)",
-    y = "Annotation Label",
-    fill = "Year"
+    title = "Spatiotemporal Training",
+    x = "Longitude (°W)",
+    y = "Latitude (°N)",
+    color = "Training Class"
   ) +
-  theme_minimal(base_size = 14) +
+  theme_minimal(base_size = 12) +
   theme(
-    plot.title = element_text(face = "bold", hjust = 0.5, margin = margin(b = 15)),
-    axis.title.x = element_text(margin = margin(t = 10)),
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    strip.text = element_text(face = "bold"),
     panel.grid.minor = element_blank(),
-    legend.position = "top"
+    legend.position = "bottom"
   )
 
-ggsave(label_sum, filename = "../figures/diag_crab1/2426_crab_labels.png", 
-       width = 9, height = 11)
+# ======================================================================
+# 3. Panel B: Bottom Depth Stratification
+# ======================================================================
+p_depth <- ggplot(plot_data, aes(x = label, y = bottom_depth, fill = label)) +
+  # Thin violins show data density curves
+  geom_violin(alpha = 0.3, color = NA, scale = "width") +
+  # Jittered background dots reveal raw sample density patterns
+  geom_jitter(aes(color = label), width = 0.15, alpha = 0.1, size = 0.6) +
+  # Heavy central boxplots capture structural quantiles
+  geom_boxplot(width = 0.25, color = "#222222", alpha = 0.8, outlier.shape = NA, linewidth = 0.6) +
+  scale_fill_manual(values = class_colors) +
+  scale_color_manual(values = class_colors) +
+  # Reverse Y-axis to naturally depict down-framer depth metrics
+  scale_y_reverse(expand = expansion(mult = c(0.05, 0.05))) +
+  labs(
+    title = "Bottom Depth",
+    x = "",
+    y = "Bottom Depth (meters)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 30, hjust = 1),
+    legend.position = "none"
+  )
+
+# ======================================================================
+# 4. Master Composite Layout & Export
+# ======================================================================
+combined_stratification <- (p_space | p_depth) +
+  plot_layout(widths = c(1.4, 1.0), guides = "collect") +
+  plot_annotation(tag_levels = 'A') & 
+  theme(legend.position = 'bottom')
+combined_stratification
+# dir.create("../figures/data_diagnostics", recursive = TRUE, showWarnings = FALSE)
+ggsave(
+  filename = "../figures/diag_crab_multi/2426_training_data_stratification.png",
+  plot = combined_stratification,
+  width = 12,
+  height = 7,
+  dpi = 300,
+  bg = "white"
+)
+
+print("Success! Training stratification diagnostic graphic saved.")
+
+# ======================================================================
+# Quantitative Dataset Summary Calculation
+# ======================================================================
+cat("\n==================================================\n")
+cat("          GLOBAL DATASET QUANTITATIVES            \n")
+cat("==================================================\n")
+
+# 1. Total Image Split Composition
+image_summary <- dat_split %>%
+  group_by(dataset_level1) %>%
+  summarize(
+    Total_Images    = n(),
+    Positive_Images = sum(as.logical(as.character(is_empty)) == FALSE),
+    Empty_Images    = sum(as.logical(as.character(is_empty)) == TRUE),
+    .groups = "drop"
+  )
+print(as.data.frame(image_summary))
+
+# 2. Training Split Species Totals
+cat("\n--- Training Split Box Counts ---\n")
+train_totals <- dat_split %>%
+  filter(as.logical(as.character(is_train)) == TRUE) %>%
+  summarize(
+    Jonah_Crab_Boxes = sum(n_jonah_crab, na.rm = TRUE),
+    Rock_Crab_Boxes  = sum(n_rock_crab, na.rm = TRUE),
+    Cancer_sp_Boxes  = sum(n_cancer_sp, na.rm = TRUE),
+    Total_Boxes      = Jonah_Crab_Boxes + Rock_Crab_Boxes + Cancer_sp_Boxes
+  )
+print(as.data.frame(train_totals))
+
+# 3. Validation Split Species Totals (How many validated)
+cat("\n--- Validation Split Box Counts ---\n")
+val_totals <- dat_split %>%
+  filter(as.logical(as.character(is_test)) == TRUE) %>%
+  summarize(
+    Jonah_Crab_Boxes = sum(n_jonah_crab, na.rm = TRUE),
+    Rock_Crab_Boxes  = sum(n_rock_crab, na.rm = TRUE),
+    Cancer_sp_Boxes  = sum(n_cancer_sp, na.rm = TRUE),
+    Total_Boxes      = Jonah_Crab_Boxes + Rock_Crab_Boxes + Cancer_sp_Boxes
+  )
+print(as.data.frame(val_totals))
+cat("==================================================\n")
+
