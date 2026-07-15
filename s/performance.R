@@ -156,3 +156,11 @@ ggsave(
   device = "pdf",
   bg = "white"
 )
+ggsave(
+  filename = "../figures/diag_crab1/2426_crab_performance.png", 
+  plot = combined_2panel, 
+  width = 9, 
+  height = 5, 
+  device = "png",
+  bg = "white"
+)

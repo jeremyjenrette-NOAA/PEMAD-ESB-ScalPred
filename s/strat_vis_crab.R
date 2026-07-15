@@ -207,6 +207,8 @@ combined_manuscript_plot
 # Export file as requested
 ggsave(combined_manuscript_plot, filename = "../figures/diag_crab1/2426_spatial_strat_final.pdf",
        width = 14, height = 15)
+ggsave(combined_manuscript_plot, filename = "../figures/diag_crab1/2426_spatial_strat_final.png",
+       width = 14, height = 15)
 
 ############
 
@@ -278,3 +280,31 @@ print(p_blocks)
 
 ggsave(p_blocks, filename = "../figures/diag_crab1/2426_crab_strat_block.pdf", 
        width = 13, height = 8)
+
+############
+
+dets = read.csv("../data/raw/groundtruth2426.csv")
+
+# 1. Ensure 'year' is treated as a discrete factor for proper grouping
+dets$year <- as.factor(dets$year)
+
+# 2. Create a grouped bar chart
+label_sum = ggplot(dets, aes(y = label, fill = year)) +
+  geom_bar(position = position_dodge(preserve = "single"), color = "black", alpha = 0.8) +
+  scale_fill_viridis_d(option = "plasma", end = 0.8) + # Clean, colorblind-friendly palette
+  labs(
+    title = "Crab Annotation Labels",
+    x = "Count (Number of Annotations)",
+    y = "Annotation Label",
+    fill = "Year"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5, margin = margin(b = 15)),
+    axis.title.x = element_text(margin = margin(t = 10)),
+    panel.grid.minor = element_blank(),
+    legend.position = "top"
+  )
+
+ggsave(label_sum, filename = "../figures/diag_crab1/2426_crab_labels.png", 
+       width = 9, height = 11)
