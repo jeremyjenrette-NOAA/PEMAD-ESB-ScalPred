@@ -31,6 +31,9 @@ gt_clean <- gt_2226 %>%
     true_pixel_length = parse_gt_length(geometry_text),
     true_length_mm = true_pixel_length * millimeter_per_pixel
   ) %>%
+  mutate(
+    region = if_else(longitude >= -71, "GB", "MAB") %>% factor(levels = c("MAB", "GB"))
+  ) %>%
   filter(!is.na(true_length_mm))
 
 # 3. Process Detections and Compute Error Statistics per Subclass -------------
@@ -63,7 +66,9 @@ compute_discrete_ovl <- function(p_manual, p_pred) {
   return(sum(pmin(p_manual, p_pred)))
 }
 
-# 4. Generate Pre-Calculated Empirical Bins (5mm Resolution) -------------------
+# ==============================================================================
+# 4. Generate Pre-Calculated Empirical Bins & True Baselines (5mm Resolution)
+# ==============================================================================
 bin_width <- 5
 bin_breaks <- seq(0, 220, by = bin_width)
 bin_mids <- bin_breaks[-length(bin_breaks)] + (bin_width / 2)
@@ -83,23 +88,29 @@ bin_frequencies <- function(data_vec, weight_vec = NULL) {
   return(counts / total)
 }
 
-# Compile Subclass Statistics & Panel Labels
+# --- CRITICAL FIX: Extract True Global Manual Population Distributions Upfront ---
+global_manual_bins <- gt_clean %>%
+  group_by(subclass) %>%
+  summarise(p_man = list(bin_frequencies(true_length_mm)), .groups = "drop")
+
+# Compile Subclass Statistics & Panel Labels evaluated against Global Truth
 generate_panel_stats <- function(df_matched, model_name) {
   df_matched %>%
     group_by(subclass) %>%
     summarise(
       MAE = mean(abs_error, na.rm = TRUE),
       Bias = mean(raw_error, na.rm = TRUE),
-      
-      # Calculate empirical distributions per subclass
-      p_man = list(bin_frequencies(true_length_mm)),
       p_f1  = list(bin_frequencies(pred_length_mm[pred_p >= unique(regional_f1_thresh)])),
       p_wt  = list(bin_frequencies(pred_length_mm, pred_p)),
-      
-      OVL_F1 = compute_discrete_ovl(p_man[[1]], p_f1[[1]]),
-      OVL_GAM = compute_discrete_ovl(p_man[[1]], p_wt[[1]]),
       .groups = "drop"
     ) %>%
+    inner_join(global_manual_bins, by = "subclass") %>% 
+    group_by(subclass) %>%
+    mutate(
+      OVL_F1 = compute_discrete_ovl(p_man[[1]], p_f1[[1]]),
+      OVL_GAM = compute_discrete_ovl(p_man[[1]], p_wt[[1]])
+    ) %>%
+    ungroup() %>%
     mutate(
       Model = model_name,
       Label = paste0("MAE: ", round(MAE, 1), " mm\nBias: ", round(Bias, 1), 
@@ -111,35 +122,54 @@ stats_yolo <- generate_panel_stats(matched_yolo, "YOLOv12")
 stats_cas  <- generate_panel_stats(matched_cas, "Cascade R-CNN")
 panel_annotations <- bind_rows(stats_yolo, stats_cas)
 
-# Construct Integrated Long Dataset for ggplot
-build_empirical_df <- function(df_matched, model_name) {
+# Construct Model Predictions Only
+build_predictions_df <- function(df_matched, model_name) {
   df_matched %>%
     group_by(subclass) %>%
     do({
       sub_data <- .
-      p_man <- bin_frequencies(sub_data$true_length_mm)
       p_f1  <- bin_frequencies(sub_data$pred_length_mm[sub_data$pred_p >= unique(sub_data$regional_f1_thresh)])
       p_wt  <- bin_frequencies(sub_data$pred_length_mm, sub_data$pred_p)
       
       data.frame(
-        Bin_Mid = rep(bin_mids, 3),
-        Percentage = c(p_man, p_f1, p_wt),
-        Workflow = rep(c("Manual", "F1 Threshold", "Weighted P(detection)"), each = length(bin_mids))
+        Bin_Mid = rep(bin_mids, 2),
+        Percentage = c(p_f1, p_wt),
+        Workflow = rep(c("F1 Threshold", "Weighted P(detection)"), each = length(bin_mids))
       )
     }) %>%
     ungroup() %>%
     mutate(Model = model_name)
 }
 
+# Construct Absolute Manual Baseline Dataset directly from gt_clean
+manual_baseline_df <- gt_clean %>%
+  group_by(subclass) %>%
+  do({
+    p_man <- bin_frequencies(.$true_length_mm)
+    data.frame(
+      Bin_Mid = bin_mids,
+      Percentage = p_man,
+      Workflow = "Manual"
+    )
+  }) %>%
+  ungroup()
+
+# Duplicate the manual track across both model facets so ggplot mirrors them perfectly
+manual_faceted_baseline <- bind_rows(
+  manual_baseline_df %>% mutate(Model = "YOLOv12"),
+  manual_baseline_df %>% mutate(Model = "Cascade R-CNN")
+)
+
+# Combine everything into integrated dataset
 grid_inventory_df <- bind_rows(
-  build_empirical_df(matched_yolo, "YOLOv12"),
-  build_empirical_df(matched_cas, "Cascade R-CNN")
+  manual_faceted_baseline,
+  build_predictions_df(matched_yolo, "YOLOv12"),
+  build_predictions_df(matched_cas, "Cascade R-CNN")
 ) %>%
   mutate(Workflow = factor(Workflow, levels = c("Manual", "F1 Threshold", "Weighted P(detection)")))
 
-# Extract empirical peaks from Manual Track
-gt_peaks <- grid_inventory_df %>%
-  filter(Workflow == "Manual") %>%
+# Extract empirical peaks from global baseline
+gt_peaks <- manual_faceted_baseline %>%
   group_by(subclass, Model) %>%
   slice(which.max(Percentage)) %>%
   select(subclass, Model, Peak_Size = Bin_Mid) %>%
