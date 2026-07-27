@@ -35,7 +35,7 @@ compare_detection_gams <- function(det_df, candidate_formulas, region_focus = "G
   })
   
   # Sort by lowest AIC
-  results <- results %>% arrange(AIC)
+  results <- results %>% arrange(Deviance_Explained) # changed from AIC
   return(results)
 }
 
@@ -71,19 +71,25 @@ fit_calibration_gams <- function(det_df, formula_gb, formula_mab) {
 # ======================================================================
 # 2. Test GAMs on Holdout Data (Dynamic F1 Thresholds)
 # ======================================================================
+
 # ======================================================================
-# UPDATED: Safely Predict (Processes all data, evaluates only holdout)
+# UPDATED: Multiclass Calibration Testing & Species-Level Evaluation
 # ======================================================================
-test_calibration_gams <- function(gams, det_df, img_df, f1_thresholds) {
+test_calibration_gams <- function(gams, det_df, img_df, f1_thresh_df, 
+                                  target_classes = c("jonah_crab", "rock_crab", "cancer_sp")) {
   
-  # We NO LONGER filter out the training data here! We want predictions for EVERYTHING.
   det_eval <- det_df 
   img_eval_base <- img_df 
   
-  # 1. Safely assign regional F1 thresholds
-  det_eval$regional_f1_thresh <- ifelse(det_eval$region == "GB", f1_thresholds[["GB"]], f1_thresholds[["MAB"]])
+  # 1. Join species- and region-specific F1 thresholds
+  det_eval <- det_eval %>%
+    left_join(
+      f1_thresh_df %>% select(region, species, regional_f1_thresh = conf),
+      by = c("region", "spname" = "species")
+    ) %>%
+    mutate(regional_f1_thresh = replace_na(regional_f1_thresh, 0.5))
   
-  # 2. Safely predict by explicitly subsetting data (prevents silent vector recycling)
+  # 2. Predict probability of correct detection using regional GAMs
   det_eval$pred_p <- NA_real_
   
   gb_idx <- which(det_eval$region == "GB")
@@ -96,8 +102,24 @@ test_calibration_gams <- function(gams, det_df, img_df, f1_thresholds) {
     det_eval$pred_p[mab_idx] <- predict(gams$MAB, newdata = det_eval[mab_idx, ], type = "response", na.action = na.pass)
   }
   
-  # 3. Aggregate predictions to the image level
-  img_predictions <- det_eval %>%
+  # 3. Aggregate predictions to image level BY SPECIES
+  sp_predictions <- det_eval %>%
+    group_by(image_id, spname) %>%
+    summarise(
+      pred_f1  = sum(conf >= regional_f1_thresh, na.rm = TRUE),
+      pred_gam = sum(pred_p, na.rm = TRUE),
+      .groups  = "drop"
+    ) %>%
+    pivot_wider(
+      id_cols = image_id,
+      names_from = spname,
+      values_from = c(pred_f1, pred_gam),
+      names_glue = "{.value}_{spname}",
+      values_fill = 0
+    )
+  
+  # 4. Aggregate TOTAL predictions across all species
+  tot_predictions <- det_eval %>%
     group_by(image_id) %>%
     summarise(
       raw_detection_number = n(),
@@ -107,10 +129,19 @@ test_calibration_gams <- function(gams, det_df, img_df, f1_thresholds) {
       .groups = "drop"
     )
   
-  # 4. Join back to master image list
+  # Ensure total annotations exist in base image df
+  if (!"n_annotations" %in% names(img_eval_base)) {
+    gt_cols <- intersect(paste0("n_", target_classes), names(img_eval_base))
+    img_eval_base$n_annotations <- rowSums(img_eval_base[, gt_cols, drop = FALSE], na.rm = TRUE)
+  }
+  
+  # 5. Join predictions back to master image dataset
   img_eval <- img_eval_base %>%
-    left_join(img_predictions, by = "image_id") %>%
+    left_join(tot_predictions, by = "image_id") %>%
+    left_join(sp_predictions, by = "image_id") %>%
     mutate(
+      across(starts_with("pred_f1_"), ~ replace_na(.x, 0)),
+      across(starts_with("pred_gam_"), ~ replace_na(.x, 0)),
       raw_detection_number = replace_na(raw_detection_number, 0),
       predicted_f1_number  = replace_na(predicted_f1_number, 0),
       predicted_number     = replace_na(predicted_number, 0),
@@ -118,149 +149,359 @@ test_calibration_gams <- function(gams, det_df, img_df, f1_thresholds) {
       false_negative       = n_annotations - true_positive_sum
     )
   
-  # 5. Calculate metrics STRICTLY on the holdout test set to avoid data leakage
-  metrics <- img_eval %>%
-    filter(dataset == "test_GAM_test") %>%  # <-- Crucial line!
+  # 6. Calculate holdout evaluation metrics (STRICTLY on test set)
+  holdout <- img_eval %>% filter(dataset == "test_GAM_test")
+  
+  # A. Species-Specific Metrics
+  metrics_sp <- purrr::map_dfr(target_classes, function(sp) {
+    gt_col   <- paste0("n_", sp)
+    pred_col <- paste0("pred_gam_", sp)
+    f1_col   <- paste0("pred_f1_", sp)
+    
+    if (!gt_col %in% names(holdout) || !pred_col %in% names(holdout)) return(NULL)
+    
+    holdout %>%
+      group_by(region) %>%
+      summarise(
+        species         = sp,
+        r2_calibrated   = summary(lm(get(gt_col) ~ get(pred_col)))$adj.r.squared,
+        rmse_calibrated = sqrt(mean((get(gt_col) - get(pred_col))^2, na.rm = TRUE)),
+        r2_f1           = summary(lm(get(gt_col) ~ get(f1_col)))$adj.r.squared,
+        rmse_f1         = sqrt(mean((get(gt_col) - get(f1_col))^2, na.rm = TRUE)),
+        n_images        = n(),
+        .groups         = "drop"
+      )
+  })
+  
+  # B. Overall Total Crab Metrics
+  metrics_tot <- holdout %>%
     group_by(region) %>%
     summarise(
+      species         = "TOTAL_CRABS",
       r2_calibrated   = summary(lm(n_annotations ~ predicted_number))$adj.r.squared,
       rmse_calibrated = sqrt(mean((n_annotations - predicted_number)^2, na.rm = TRUE)),
       r2_f1           = summary(lm(n_annotations ~ predicted_f1_number))$adj.r.squared,
       rmse_f1         = sqrt(mean((n_annotations - predicted_f1_number)^2, na.rm = TRUE)),
       n_images        = n(),
-      .groups = "drop"
+      .groups         = "drop"
     )
+  
+  metrics <- bind_rows(metrics_sp, metrics_tot)
   
   return(list(img_eval = img_eval, det_eval = det_eval, metrics = metrics))
 }
+
 # ======================================================================
-# 3. Generate Diagnostic Plots (Restored Aesthetics)
+# UPDATED: Multiclass Diagnostic Plots with Metrics Overlay & F1 Comparison
 # ======================================================================
-# ======================================================================
-# 3. Generate Diagnostic Plots (Restored Aesthetics)
-# ======================================================================
-generate_gam_plots <- function(eval_res, model_name, dataset_label = "2022-2024, 2026") {
+generate_gam_plots <- function(
+    eval_res, 
+    model_name, 
+    dataset_label = "2024, 2026", 
+    target_classes = c("jonah_crab", "rock_crab", "cancer_sp")
+) {
   
-  # STRICTLY filter to the holdout test set to prevent visual data leakage!
-  img_df <- eval_res$img_eval %>% filter(dataset == "test_GAM_test")
-  det_df <- eval_res$det_eval %>% filter(dataset == "test_GAM_test")
-  
-  # Metrics were already filtered in test_calibration_gams, but we'll pull them normally
+  # 1. Isolate Holdout Test Data & Metrics
+  img_df  <- eval_res$img_eval %>% filter(dataset == "test_GAM_test")
+  det_df  <- eval_res$det_eval %>% filter(dataset == "test_GAM_test")
   metrics <- eval_res$metrics
   
-  # Calculate n images and spell out region names for facet labels
-  img_df <- img_df %>%
+  # Enhance region labels with image count (n)
+  region_counts <- img_df %>%
+    group_by(region) %>%
+    summarise(n_img = n(), .groups = "drop") %>%
     mutate(
       region_full = case_when(
         region == "GB" ~ "Georges Bank",
         region == "MAB" ~ "Mid-Atlantic Bight",
         TRUE ~ as.character(region)
-      )
-    ) %>%
-    group_by(region_full) %>%
-    mutate(facet_label = paste0(region_full, " (n = ", n(), ")")) %>%
-    ungroup()
+      ),
+      facet_region_label = paste0(region_full, " (n = ", n_img, " images)")
+    )
   
-  metrics_labels <- metrics %>%
+  img_df <- img_df %>% left_join(region_counts, by = "region")
+  
+  # --------------------------------------------------------------------
+  # A. Species-Level Calibration Plot with GAM vs F1 Metrics
+  # --------------------------------------------------------------------
+  sp_long <- img_df %>%
+    pivot_longer(
+      cols = all_of(paste0("n_", target_classes)),
+      names_to = "gt_sp", names_prefix = "n_", values_to = "true_count"
+    ) %>%
+    pivot_longer(
+      cols = all_of(paste0("pred_gam_", target_classes)),
+      names_to = "pred_sp", names_prefix = "pred_gam_", values_to = "pred_count"
+    ) %>%
+    filter(gt_sp == pred_sp) %>%
+    mutate(species_clean = gsub("_", " ", tools::toTitleCase(gt_sp)))
+  
+  # Format metrics annotation labels per species & region
+  sp_metrics_labels <- metrics %>%
+    filter(species != "TOTAL_CRABS") %>%
+    left_join(region_counts, by = "region") %>%
     mutate(
-      region_full = case_when(region == "GB" ~ "Georges Bank", region == "MAB" ~ "Mid-Atlantic Bight", TRUE ~ region),
-      label = sprintf("R² = %.2f\nRMSE = %.2f", r2_calibrated, rmse_calibrated)
-    ) %>%
-    left_join(img_df %>% distinct(region_full, facet_label), by = "region_full")
+      species_clean = gsub("_", " ", tools::toTitleCase(species)),
+      gt_sp = species,
+      label_text = sprintf(
+        "GAM: R²=%.2f, RMSE=%.2f\nF1:   R²=%.2f, RMSE=%.2f",
+        r2_calibrated, rmse_calibrated, r2_f1, rmse_f1
+      )
+    )
   
-  # A. Zoomed 1-to-1 Calibration Fit Plot
+  p_species_fit <- ggplot(sp_long, aes(x = pred_count, y = true_count)) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey40") +
+    geom_point(aes(color = species_clean), alpha = 0.6, size = 1.8) +
+    facet_grid(facet_region_label ~ species_clean, scales = "free") +
+    geom_text(
+      data = sp_metrics_labels,
+      aes(x = -Inf, y = Inf, label = label_text),
+      hjust = -0.05, vjust = 1.15, inherit.aes = FALSE,
+      size = 3.1, fontface = "bold", family = "mono", color = "grey20"
+    ) +
+    theme_bw(base_size = 12) +
+    labs(
+      title = paste0("Species-Level Abundance Calibration: ", model_name),
+      subtitle = paste0("Evaluated on Holdout Test Set (Dataset: ", dataset_label, ")"),
+      x = "GAM Calibrated Count (Σ p)",
+      y = "Manual Ground Truth Count",
+      color = "Species"
+    ) +
+    theme(
+      strip.text = element_text(face = "bold", size = 10),
+      legend.position = "none"
+    )
+  
+  # --------------------------------------------------------------------
+  # B. Total Crab Abundance Fit with Metrics Overlay
+  # --------------------------------------------------------------------
+  tot_metrics_labels <- metrics %>%
+    filter(species == "TOTAL_CRABS") %>%
+    left_join(region_counts, by = "region") %>%
+    mutate(
+      label_text = sprintf(
+        "GAM Calibrated:\n  R² = %.2f | RMSE = %.2f\nF1 Cutoff:\n  R² = %.2f | RMSE = %.2f",
+        r2_calibrated, rmse_calibrated, r2_f1, rmse_f1
+      )
+    )
+  
   p_zoomed <- ggplot(img_df, aes(x = predicted_number, y = n_annotations)) +
     geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey40") +
-    geom_point(color = "red", size = 1.5, alpha = 0.6) +
-    facet_wrap(~ facet_label, scales = "free") +
+    geom_point(color = "#2C7FB8", size = 2, alpha = 0.6) +
+    facet_wrap(~ facet_region_label, scales = "free") +
     geom_text(
-      data = metrics_labels, aes(x = -Inf, y = Inf, label = label),
-      hjust = -0.2, vjust = 1.5, inherit.aes = FALSE, size = 4, fontface = "bold"
+      data = tot_metrics_labels,
+      aes(x = -Inf, y = Inf, label = label_text),
+      hjust = -0.08, vjust = 1.18, inherit.aes = FALSE,
+      size = 3.6, fontface = "bold", color = "grey15"
     ) +
-    theme_bw(base_size = 13) +
+    theme_bw(base_size = 12) +
     labs(
-      title = "True abundance vs. Σ calibrated detection probabilities per image", 
-      subtitle = bquote("Dataset: " ~ .(dataset_label) * ", Detection Model: " ~ bold(.(model_name))),
-      x = "Σ p(detection)", y = "Manual count"
+      title = paste0("Total Crab Abundance Calibration: ", model_name),
+      subtitle = paste0("Evaluated on Holdout Test Set (Dataset: ", dataset_label, ")"),
+      x = "Total GAM Calibrated Count (Σ p)",
+      y = "Total Manual Ground Truth Count"
     ) +
-    theme(strip.text = element_text(face = "bold", size = 12))
+    theme(strip.text = element_text(face = "bold", size = 11))
   
-  # B. Residuals
+  # --------------------------------------------------------------------
+  # C. Residual Analysis
+  # --------------------------------------------------------------------
   p_resid <- img_df %>%
     mutate(residual = predicted_number - n_annotations) %>%
     ggplot(aes(x = n_annotations, y = residual)) +
     geom_point(alpha = 0.5, color = "#2C7FB8") +
-    geom_hline(yintercept = 0, linetype = "dashed") +
-    theme_minimal() +
-    labs(title = "Residuals vs True Count", subtitle = model_name, x = "True count", y = "Residual")
+    geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+    facet_wrap(~ facet_region_label, scales = "free_x") +
+    theme_bw(base_size = 12) +
+    labs(
+      title = paste0("Residuals vs True Abundance: ", model_name),
+      subtitle = paste0("Holdout Test Set (Dataset: ", dataset_label, ")"),
+      x = "Manual Ground Truth Count",
+      y = "Residual (GAM Predicted - True)"
+    ) +
+    theme(strip.text = element_text(face = "bold"))
   
-  # C. False Negatives
-  p_fn <- ggplot(img_df, aes(x = n_annotations, y = false_negative)) +
-    geom_point(alpha = 0.5, color = "#D95F0E") +
-    geom_smooth(method = "gam", color = "black") +
-    theme_minimal() +
-    labs(title = "False Negatives vs True Abundance", subtitle = model_name, x = "True abundance", y = "False negatives")
-  
-  # D. Total Abundance Summary
-  sum_df <- data.frame(
-    metric = factor(c("True count", "Raw detector", "GAM Calibrated", "F1 Cutoff"), 
-                    levels = c("True count", "Raw detector", "F1 Cutoff", "GAM Calibrated")),
-    value  = c(
-      sum(img_df$n_annotations, na.rm = TRUE),
-      nrow(det_df),
-      sum(det_df$pred_p, na.rm = TRUE),
-      sum(img_df$predicted_f1_number, na.rm = TRUE)
+  # --------------------------------------------------------------------
+  # D. Species Macro-Abundance Comparison Bar Chart
+  # --------------------------------------------------------------------
+  sum_by_sp <- purrr::map_dfr(target_classes, function(sp) {
+    gt_col   <- paste0("n_", sp)
+    pred_gam <- paste0("pred_gam_", sp)
+    pred_f1  <- paste0("pred_f1_", sp)
+    
+    raw_cnt  <- sum(det_df$spname == sp, na.rm = TRUE)
+    gt_cnt   <- sum(img_df[[gt_col]], na.rm = TRUE)
+    f1_cnt   <- sum(img_df[[pred_f1]], na.rm = TRUE)
+    gam_cnt  <- sum(img_df[[pred_gam]], na.rm = TRUE)
+    
+    tibble(
+      species = gsub("_", " ", tools::toTitleCase(sp)),
+      `True Count`     = gt_cnt,
+      `Raw Detector`   = raw_cnt,
+      `F1 Cutoff`      = f1_cnt,
+      `GAM Calibrated` = gam_cnt
     )
-  )
+  }) %>%
+    pivot_longer(-species, names_to = "Approach", values_to = "Count") %>%
+    mutate(Approach = factor(Approach, levels = c("True Count", "Raw Detector", "F1 Cutoff", "GAM Calibrated")))
   
-  p_sum <- ggplot(sum_df, aes(x = metric, y = value, fill = metric)) +
-    geom_col(width = 0.6, color = "black") +
-    geom_hline(yintercept = sum_df$value[1], linetype = "dashed", color = "black", linewidth = 1) +
-    geom_text(aes(label = round(value, 0)), vjust = -0.5, fontface = "bold") +
+  p_sum <- ggplot(sum_by_sp, aes(x = species, y = Count, fill = Approach)) +
+    geom_col(position = position_dodge(width = 0.8), width = 0.7, color = "black") +
+    geom_text(
+      aes(label = round(Count, 0)),
+      position = position_dodge(width = 0.8),
+      vjust = -0.4, size = 3.2, fontface = "bold"
+    ) +
     scale_fill_manual(values = c("grey40", "salmon", "#D95F0E", "#2C7FB8")) +
-    theme_minimal() +
-    labs(title = "Total Scallop Abundance Estimate", subtitle = model_name, x = "", y = "Total sum count") +
-    theme(legend.position = "none")
+    theme_minimal(base_size = 12) +
+    labs(
+      title = paste0("Macro Abundance Estimation by Species: ", model_name),
+      subtitle = paste0("Total Count Comparison across Holdout Test Set (n = ", nrow(img_df), " images)"),
+      x = "Species",
+      y = "Total Abundance Count",
+      fill = "Approach"
+    ) +
+    theme(
+      legend.position = "top",
+      plot.title = element_text(face = "bold"),
+      axis.text.x = element_text(face = "bold")
+    )
   
-  return(list(p_zoomed = p_zoomed, p_resid = p_resid, p_fn = p_fn, p_sum = p_sum))
+  return(list(
+    p_species_fit = p_species_fit,
+    p_zoomed      = p_zoomed,
+    p_resid       = p_resid,
+    p_sum         = p_sum
+  ))
 }
+
 # ======================================================================
 # 4. Build Synergistic Image-Level Dataset
 # ======================================================================
-build_synergy_dataset <- function(yolo_eval, cas_eval, meta_df) {
+build_synergy_dataset_multi <- function(yolo_eval, cas_eval, meta_df, 
+                                        target_classes = c("jonah_crab", "rock_crab", "cancer_sp")) {
   
-  # Find images common to both test sets
+  # 1. Identify common image IDs across both holdout sets
   common_ids <- intersect(yolo_eval$img_eval$image_id, cas_eval$img_eval$image_id)
   
-  img_combined <- yolo_eval$img_eval %>%
-    filter(image_id %in% common_ids) %>%
-    select(image_id, region, dataset, n_annotations, pred_yolo = predicted_number) %>%
-    left_join(
-      cas_eval$img_eval %>%
-        filter(image_id %in% common_ids) %>%
-        select(image_id, pred_cascade = predicted_number),
-      by = "image_id"
-    ) %>%
-    mutate(
-      pred_mean = (pred_yolo + pred_cascade) / 2,
-      pred_diff = pred_cascade - pred_yolo,
-      pred_sum  = pred_yolo + pred_cascade,
-      log_yolo_pred = log1p(pred_yolo),
-      log_cascade_pred = log1p(pred_cascade),
-      log_pred_mean = log1p(pred_mean),
-      log_pred_sum = log1p(pred_sum),
-      log_pred_diff = log1p(abs(pred_diff)),
-      log_true_number = log1p(n_annotations + 1e-6)
-    )
+  gt_cols <- paste0("n_", target_classes)
   
-  # Attach environmental metadata
+  # 2. Extract YOLO predictions & Ground Truth counts
+  yolo_sp <- yolo_eval$img_eval %>%
+    filter(image_id %in% common_ids) %>%
+    select(
+      image_id, region, dataset, n_annotations, 
+      any_of(gt_cols), 
+      starts_with("pred_gam_")
+    ) %>%
+    rename_with(~ paste0("yolo_", .x), starts_with("pred_gam_"))
+  
+  # 3. Extract Cascade predictions ONLY (avoids repeating GT cols)
+  cas_sp <- cas_eval$img_eval %>%
+    filter(image_id %in% common_ids) %>%
+    select(image_id, starts_with("pred_gam_")) %>%
+    rename_with(~ paste0("cascade_", .x), starts_with("pred_gam_"))
+  
+  # 4. Join model outputs
+  img_combined <- yolo_sp %>%
+    left_join(cas_sp, by = "image_id")
+  
+  # 5. Calculate per-species diffs and log-transforms
+  for (sp in target_classes) {
+    y_col <- paste0("yolo_pred_gam_", sp)
+    c_col <- paste0("cascade_pred_gam_", sp)
+    
+    if (y_col %in% names(img_combined) && c_col %in% names(img_combined)) {
+      img_combined[[paste0("log_yolo_", sp)]]    <- log1p(img_combined[[y_col]])
+      img_combined[[paste0("log_cascade_", sp)]] <- log1p(img_combined[[c_col]])
+      img_combined[[paste0("diff_", sp)]]        <- img_combined[[c_col]] - img_combined[[y_col]]
+    }
+  }
+  
+  # 6. Safely attach environmental metadata (Drop ALL existing columns to prevent .x/.y suffixes)
+  existing_cols <- setdiff(names(img_combined), "image_id")
+  
   img_combined <- img_combined %>%
     left_join(
-      meta_df %>% select(-any_of(c("region", "dataset", "n_annotations", "imagename"))), 
+      meta_df %>% select(-any_of(existing_cols), -any_of("imagename")), 
       by = "image_id"
     )
   
   return(img_combined)
+}
+
+# Fit per-species synergistic GAMs
+fit_synergy_gams_multi <- function(img_combined, formula_list_gb, formula_list_mab, 
+                                   target_classes = c("jonah_crab", "rock_crab", "cancer_sp")) {
+  train_data <- img_combined %>% filter(dataset == "test_GAM_train")
+  
+  gams <- list()
+  
+  for (sp in target_classes) {
+    cat("Fitting Synergy GAMs for:", sp, "\n")
+    form_gb  <- formula_list_gb[[sp]]
+    form_mab <- formula_list_mab[[sp]]
+    
+    m_gb  <- gam(form_gb,  family = nb(), data = train_data %>% filter(region == "GB"),  method = "REML")
+    m_mab <- gam(form_mab, family = nb(), data = train_data %>% filter(region == "MAB"), method = "REML")
+    
+    gams[[sp]] <- list(GB = m_gb, MAB = m_mab)
+  }
+  
+  return(gams)
+}
+
+# Test per-species synergistic GAMs on holdout set
+test_synergy_gams_multi <- function(gams_multi, img_combined, 
+                                    target_classes = c("jonah_crab", "rock_crab", "cancer_sp")) {
+  
+  test_data <- img_combined %>% filter(dataset == "test_GAM_test")
+  
+  for (sp in target_classes) {
+    pred_col <- paste0("pred_synergy_", sp)
+    test_data[[pred_col]] <- NA_real_
+    
+    gb_idx  <- which(test_data$region == "GB")
+    mab_idx <- which(test_data$region == "MAB")
+    
+    if (length(gb_idx) > 0) {
+      test_data[[pred_col]][gb_idx] <- predict(gams_multi[[sp]]$GB, newdata = test_data[gb_idx, ], type = "response")
+    }
+    if (length(mab_idx) > 0) {
+      test_data[[pred_col]][mab_idx] <- predict(gams_multi[[sp]]$MAB, newdata = test_data[mab_idx, ], type = "response")
+    }
+  }
+  
+  # Total synergy count = sum of individual species synergy predictions
+  synergy_pred_cols <- paste0("pred_synergy_", target_classes)
+  test_data$pred_synergy_total <- rowSums(test_data[, synergy_pred_cols, drop = FALSE], na.rm = TRUE)
+  
+  # Calculate metrics per species & total
+  metrics <- purrr::map_dfr(target_classes, function(sp) {
+    gt_col   <- paste0("n_", sp)
+    pred_col <- paste0("pred_synergy_", sp)
+    
+    test_data %>%
+      group_by(region) %>%
+      summarise(
+        species      = sp,
+        r2_synergy   = summary(lm(get(gt_col) ~ get(pred_col)))$adj.r.squared,
+        rmse_synergy = sqrt(mean((get(gt_col) - get(pred_col))^2, na.rm = TRUE)),
+        .groups      = "drop"
+      )
+  })
+  
+  tot_metrics <- test_data %>%
+    group_by(region) %>%
+    summarise(
+      species      = "TOTAL_CRABS",
+      r2_synergy   = summary(lm(n_annotations ~ pred_synergy_total))$adj.r.squared,
+      rmse_synergy = sqrt(mean((n_annotations - pred_synergy_total)^2, na.rm = TRUE)),
+      .groups      = "drop"
+    )
+  
+  return(list(img_eval = test_data, metrics = bind_rows(metrics, tot_metrics)))
 }
 
 # ======================================================================
@@ -331,4 +572,88 @@ test_synergy_gams <- function(gams, img_combined) {
     )
   
   return(list(img_eval = test_data, metrics = metrics))
+}
+
+# ======================================================================
+# FIXED: Multiclass Synergistic Model Comparison & Extraction
+# ======================================================================
+compare_synergy_gams_multi <- function(
+    img_combined, 
+    candidate_templates, 
+    region_focus = "GB", 
+    target_classes = c("jonah_crab", "rock_crab", "cancer_sp")
+) {
+  
+  train_data <- img_combined %>% filter(dataset == "test_GAM_train", region == region_focus)
+  
+  cat(sprintf("\n==================================================\n"))
+  cat(sprintf("Synergy Model Selection: %s (n = %d images)\n", region_focus, nrow(train_data)))
+  cat(sprintf("==================================================\n"))
+  
+  results <- purrr::map_dfr(target_classes, function(sp) {
+    gt_var <- paste0("n_", sp)
+    
+    purrr::map_dfr(names(candidate_templates), function(mod_name) {
+      # 1. Substitute species placeholder into template
+      template_str <- candidate_templates[[mod_name]]
+      form_str     <- gsub("\\{sp\\}", sp, template_str)
+      form         <- as.formula(form_str)
+      
+      # 2. Fit model safely with error handling
+      fit <- tryCatch({
+        gam(form, family = nb(), data = train_data, method = "REML")
+      }, error = function(e) {
+        cat(sprintf("   [Warning] Model %s failed for %s: %s\n", mod_name, sp, e$message))
+        return(NULL)
+      })
+      
+      if (is.null(fit)) return(NULL)
+      
+      # 3. Calculate evaluation metrics on training set
+      preds   <- predict(fit, type = "response")
+      gt_vals <- train_data[[gt_var]]
+      
+      # FIX: Use deparse1() or collapse deparse() output into a single string
+      formula_single_str <- paste(deparse(form), collapse = " ")
+      
+      tibble(
+        region             = region_focus,
+        species            = sp,
+        Model_ID           = mod_name,
+        Formula            = formula_single_str, # Single clean string
+        AIC                = AIC(fit),
+        Deviance_Explained = summary(fit)$dev.expl * 100,
+        RMSE_Train         = sqrt(mean((gt_vals - preds)^2, na.rm = TRUE)),
+        R2_Train           = summary(lm(gt_vals ~ preds))$adj.r.squared
+      )
+    })
+  })
+  
+  # Group by species and rank by lowest AIC
+  results <- results %>%
+    group_by(species) %>%
+    arrange(AIC, .by_group = TRUE) %>%
+    ungroup()
+  
+  return(results)
+}
+
+extract_best_formulas <- function(selection_results, metric = "AIC") {
+  best_df <- selection_results %>%
+    group_by(species) %>%
+    {
+      if (metric == "AIC") slice_min(., order_by = AIC, n = 1)
+      else if (metric == "Deviance") slice_max(., order_by = Deviance_Explained, n = 1)
+      else slice_min(., order_by = RMSE_Train, n = 1)
+    } %>%
+    ungroup()
+  
+  out_list <- list()
+  for (i in seq_len(nrow(best_df))) {
+    sp <- best_df$species[i]
+    # FIX: Ensure clean single string conversion to formula
+    form_str <- paste(best_df$Formula[[i]], collapse = " ")
+    out_list[[sp]] <- as.formula(form_str)
+  }
+  return(out_list)
 }

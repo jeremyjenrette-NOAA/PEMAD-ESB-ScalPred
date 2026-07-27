@@ -156,11 +156,11 @@ generate_confusion_matrix <- function(
     ) %>%
     count(actual, predicted)
   
-  # 3. Missed Ground Truths (False Negatives)
+  # 3. Missed Ground Truths (False Negatives) - Modernized dplyr syntax & base R string removal
   total_manual <- img_data %>%
-    summarise(across(all_of(paste0("n_", target_classes)), sum, na.rm = TRUE)) %>%
+    summarise(across(all_of(paste0("n_", target_classes)), \(x) sum(x, na.rm = TRUE))) %>%
     pivot_longer(everything(), names_to = "species", values_to = "total_gt") %>%
-    mutate(actual = str_remove(species, "^n_"))
+    mutate(actual = sub("^n_", "", species)) # Uses base R 'sub' instead of 'str_remove'
   
   # Count unique GT boxes successfully matched above threshold
   detected_counts <- df_th %>%
