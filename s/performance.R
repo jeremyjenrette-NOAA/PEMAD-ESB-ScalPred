@@ -10,7 +10,7 @@ source("./procfunc.R")
 # ============================================================#
 # 1. Load Unified Data and Evaluate
 # ============================================================#
-models <- readRDS("../data/processed/crab_evalmulti_2426.rds")
+models <- readRDS("../data/processed/seal_eval_2026.rds")
 
 # Evaluate class-specific PR curves
 out_pr <- evaluate_pr_models(models, stratify_region = FALSE, conf_grid = seq(0, 1, by = 0.005))
@@ -79,8 +79,8 @@ conf_normalized <- conf_data %>%
   mutate(pct = n / sum(n) * 100) %>%
   ungroup() %>%
   mutate(
-    actual = factor(actual, levels = c("jonah_crab", "rock_crab", "cancer_sp", "Background")),
-    predicted = factor(predicted, levels = c("jonah_crab", "rock_crab", "cancer_sp", "Missed"))
+    actual = factor(actual, levels = c("adult", "pup", "background")),
+    predicted = factor(predicted, levels = c("adult", "pup", "missed"))
   )
 
 p_conf <- ggplot(conf_normalized, aes(x = predicted, y = actual, fill = pct)) +
@@ -121,9 +121,9 @@ combined_layout
 # dir.create("../figures/diag_crab1", recursive = TRUE, showWarnings = FALSE)
 
 ggsave(
-  filename = "../figures/diag_crab_multi/2426_multiclass_crab_performance.png", 
+  filename = "../figures/diag_seal1/26_seal_performance.png", 
   plot = combined_layout, 
-  width = 15, 
+  width = 11, 
   height = 9, 
   device = "png",
   bg = "white"

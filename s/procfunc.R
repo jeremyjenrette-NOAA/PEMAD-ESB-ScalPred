@@ -14,24 +14,32 @@ evaluate_pr_curve <- function(
     img_df,
     conf_grid = seq(0, 1, by = 0.005), 
     model_id  = "model",
-    target_class = "jonah_crab"
+    target_class = "adult"
 ) {
-  # Calculate total ground truth for this target class across all images
+  target_class <- tolower(target_class)
   gt_col <- paste0("n_", target_class)
-  total_gt <- sum(img_df[[gt_col]], na.rm = TRUE)
+  
+  # Determine total ground truth count
+  if (gt_col %in% names(img_df)) {
+    total_gt <- sum(img_df[[gt_col]], na.rm = TRUE)
+  } else {
+    # Fallback: Count total ground truths present in detection file
+    total_gt <- sum(tolower(calib_df$gt_label) == target_class, na.rm = TRUE)
+  }
   
   map_dfr(conf_grid, function(th) {
     
     # Isolate predictions above confidence threshold for the target class
-    df_th <- calib_df %>% filter(conf >= th, spname == target_class)
+    df_th <- calib_df %>% 
+      filter(conf >= th, tolower(spname) == target_class)
     
-    # TP: Predicted as target_class, matched to GT, and actual label matches
-    TP <- sum(df_th$truedetect == TRUE & df_th$gt_label == target_class, na.rm = TRUE)
+    # TP: Predicted as target_class, true detection, actual label matches
+    TP <- sum(df_th$truedetect == TRUE & tolower(df_th$gt_label) == target_class, na.rm = TRUE)
     
-    # FP: Predicted as target_class but matched to background OR matched to another species
-    FP <- sum(df_th$truedetect == FALSE | (df_th$truedetect == TRUE & df_th$gt_label != target_class), na.rm = TRUE)
+    # FP: Predicted as target_class but background OR matched to wrong species
+    FP <- sum(df_th$truedetect == FALSE | (df_th$truedetect == TRUE & tolower(df_th$gt_label) != target_class), na.rm = TRUE)
     
-    # FN: Ground truth targets of this species missed by predictions of this species
+    # FN: Ground truth targets missed
     FN <- max(0L, total_gt - TP)
     
     precision <- if ((TP + FP) == 0) NA_real_ else TP / (TP + FP)
@@ -54,7 +62,7 @@ evaluate_pr_curve <- function(
 }
 
 # ----------------------------------------------------------------------
-# 2. Average Precision (mAP) Calculator via Trapezoidal AUC
+# 2. Average Precision (AP) Calculator via Trapezoidal AUC
 # ----------------------------------------------------------------------
 calculate_ap <- function(recall, precision) {
   valid <- !is.na(recall) & !is.na(precision)
@@ -72,27 +80,24 @@ calculate_ap <- function(recall, precision) {
 }
 
 # ----------------------------------------------------------------------
-# 3. Model Wrapper (Stratification and Plot Generation)
+# 3. Model Wrapper (Plot Generation & mAP Calculation)
 # ----------------------------------------------------------------------
 evaluate_pr_models <- function(
     models_list, 
     conf_grid = seq(0, 1, by = 0.005),
+    target_classes = c("adult", "pup"),
     stratify_region = FALSE
 ) {
-  target_classes <- c("jonah_crab", "rock_crab", "cancer_sp")
-  
   pr_all <- map_dfr(names(models_list), function(mod_name) {
     img_data <- models_list[[mod_name]]$img
     det_data <- models_list[[mod_name]]$det
     
     map_dfr(target_classes, function(sp) {
-      if (stratify_region) {
-        # Georges Bank Subset
+      if (stratify_region && "region" %in% names(img_data)) {
         gb_img <- img_data %>% filter(region == "GB")
         gb_det <- det_data %>% filter(region == "GB")
         pr_gb <- evaluate_pr_curve(gb_det, gb_img, conf_grid, paste0(mod_name, " GB"), sp)
         
-        # Mid-Atlantic Bight Subset
         mab_img <- img_data %>% filter(region == "MAB")
         mab_det <- det_data %>% filter(region == "MAB")
         pr_mab <- evaluate_pr_curve(mab_det, mab_img, conf_grid, paste0(mod_name, " MAB"), sp)
@@ -109,16 +114,17 @@ evaluate_pr_models <- function(
   p_pr <- ggplot(pr_all, aes(x = recall, y = precision, color = species, linetype = model)) +
     geom_path(linewidth = 1.1, na.rm = TRUE) +
     theme_minimal() +
-    xlim(0.05, 1) +
+    xlim(0, 1) +
+    ylim(0, 1) +
     labs(
-      title = "Precision-Recall",
+      title = "Seal Detection: Precision-Recall Curve",
       x = "Recall",
       y = "Precision",
-      color = "Species",
+      color = "Class",
       linetype = legend_title
     )
   
-  # Calculate mAP per model and species
+  # Calculate AP per model and species
   map_summary <- pr_all %>%
     group_by(model, species) %>%
     summarize(Average_Precision = calculate_ap(recall, precision), .groups = "drop")
@@ -133,58 +139,65 @@ generate_confusion_matrix <- function(
     det_data, 
     img_data, 
     threshold, 
-    target_classes = c("jonah_crab", "rock_crab", "cancer_sp")
+    target_classes = c("adult", "pup")
 ) {
-  # Filter predictions above the selected threshold
+  target_classes <- tolower(target_classes)
   df_th <- det_data %>% filter(conf >= threshold)
   
-  # 1. Matches & Misclassifications (True Positives and Cross-Class Errors)
+  # 1. True Positives and Cross-Class Errors
   matches <- df_th %>%
     filter(truedetect == TRUE) %>%
     mutate(
-      predicted = spname,
-      actual = gt_label
+      predicted = tolower(spname),
+      actual    = tolower(gt_label)
     ) %>%
     count(actual, predicted)
   
-  # 2. Background False Positives (Predicted as a species, but actually Background)
+  # 2. Background False Positives
   fps <- df_th %>%
     filter(truedetect == FALSE) %>%
     mutate(
-      predicted = spname,
-      actual = "Background"
+      predicted = tolower(spname),
+      actual    = "background"
     ) %>%
     count(actual, predicted)
   
-  # 3. Missed Ground Truths (False Negatives) - Modernized dplyr syntax & base R string removal
-  total_manual <- img_data %>%
-    summarise(across(all_of(paste0("n_", target_classes)), \(x) sum(x, na.rm = TRUE))) %>%
-    pivot_longer(everything(), names_to = "species", values_to = "total_gt") %>%
-    mutate(actual = sub("^n_", "", species)) # Uses base R 'sub' instead of 'str_remove'
+  # 3. Missed Ground Truths (False Negatives)
+  gt_cols <- paste0("n_", target_classes)
   
-  # Count unique GT boxes successfully matched above threshold
+  if (all(gt_cols %in% names(img_data))) {
+    total_manual <- img_data %>%
+      summarise(across(all_of(gt_cols), \(x) sum(x, na.rm = TRUE))) %>%
+      pivot_longer(everything(), names_to = "species", values_to = "total_gt") %>%
+      mutate(actual = sub("^n_", "", species))
+  } else {
+    total_manual <- det_data %>%
+      filter(tolower(gt_label) %in% target_classes) %>%
+      count(gt_label, name = "total_gt") %>%
+      mutate(actual = tolower(gt_label))
+  }
+  
   detected_counts <- df_th %>%
     filter(truedetect == TRUE) %>%
     count(gt_label, name = "detected") %>%
-    mutate(actual = gt_label)
+    mutate(actual = tolower(gt_label))
   
   fns <- total_manual %>%
     left_join(detected_counts, by = "actual") %>%
     mutate(
       detected = replace_na(detected, 0L),
       n = pmax(0L, total_gt - detected),
-      predicted = "Missed"
+      predicted = "missed"
     ) %>%
     select(actual, predicted, n)
   
-  # Combine into a structured grid layout
   all_counts <- bind_rows(matches, fps, fns)
   
   grid <- expand_grid(
-    actual = c(target_classes, "Background"),
-    predicted = c(target_classes, "Missed")
+    actual = c(target_classes, "background"),
+    predicted = c(target_classes, "missed")
   ) %>%
-    filter(!(actual == "Background" & predicted == "Missed")) # Background cannot be missed
+    filter(!(actual == "background" & predicted == "missed"))
   
   grid %>%
     left_join(all_counts, by = c("actual", "predicted")) %>%
