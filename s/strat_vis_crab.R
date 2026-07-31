@@ -6,11 +6,12 @@ library(patchwork)
 # ======================================================================
 # 1. Load and Prepare Plotting Data
 # ======================================================================
-dat_split <- read.csv("../data/raw/dataset_split_crab_multiclass.csv")
+dat_split <- read.csv("../data/raw/dataset_split_star.csv")
 
 # Robustly filter for training data and sanitize logical/character flags
 train_data <- dat_split %>%
   filter(as.logical(as.character(is_train)) == TRUE) %>%
+  filter(!is.na(year)) %>%
   mutate(
     is_empty = as.logical(as.character(is_empty)),
     year     = factor(year)
@@ -25,27 +26,28 @@ empties <- train_data %>%
 positives <- train_data %>%
   filter(is_empty == FALSE) %>%
   pivot_longer(
-    cols = c(n_jonah_crab, n_rock_crab, n_cancer_sp),
+    cols = c(n_asterias, n_astropecten, n_leptasterias),
     names_to = "species_col",
     values_to = "count"
   ) %>%
   filter(count > 0) %>%
   mutate(label = case_when(
-    species_col == "n_jonah_crab" ~ "Jonah Crab",
-    species_col == "n_rock_crab"  ~ "Rock Crab",
-    species_col == "n_cancer_sp"  ~ "Cancer sp.",
+    species_col == "n_asterias" ~ "Common Star",
+    species_col == "n_astropecten"  ~ "Sand Star",
+    species_col == "n_leptasterias"  ~ "Northern Star",
     TRUE ~ "Other"
   ))
 
 # Combine back into a clean, factor-ordered plotting frame
 plot_data <- bind_rows(empties, positives) %>%
-  mutate(label = factor(label, levels = c("Jonah Crab", "Rock Crab", "Cancer sp.", "Empty Background")))
+  mutate(label = factor(label, levels = c("Common Star", "Sand Star", "Northern Star",
+                                          "Empty Background")))
 
 # Colorblind-friendly, high-contrast palette definition
 class_colors <- c(
-  "Jonah Crab"       = "#E69F00",  # Orange
-  "Rock Crab"        = "#56B4E9",  # Sky Blue
-  "Cancer sp."       = "#009E73",  # Bluish Green
+  "Sand Star"       = "#E69F00",  # Orange
+  "Northern Star"        = "#56B4E9",  # Sky Blue
+  "Common Star"       = "#009E73",  # Bluish Green
   "Empty Background" = "#999999"   # Slate Grey
 )
 
@@ -107,9 +109,9 @@ combined_stratification <- (p_space | p_depth) +
 combined_stratification
 # dir.create("../figures/data_diagnostics", recursive = TRUE, showWarnings = FALSE)
 ggsave(
-  filename = "../figures/diag_crab_multi/2426_training_data_stratification.png",
+  filename = "../figures/diag_star1/24_star_stratification.png",
   plot = combined_stratification,
-  width = 12,
+  width = 12.5,
   height = 7,
   dpi = 300,
   bg = "white"
@@ -140,10 +142,10 @@ cat("\n--- Training Split Box Counts ---\n")
 train_totals <- dat_split %>%
   filter(as.logical(as.character(is_train)) == TRUE) %>%
   summarize(
-    Jonah_Crab_Boxes = sum(n_jonah_crab, na.rm = TRUE),
-    Rock_Crab_Boxes  = sum(n_rock_crab, na.rm = TRUE),
-    Cancer_sp_Boxes  = sum(n_cancer_sp, na.rm = TRUE),
-    Total_Boxes      = Jonah_Crab_Boxes + Rock_Crab_Boxes + Cancer_sp_Boxes
+    Sand_star_boxes = sum(n_astropecten, na.rm = TRUE),
+    Common_star_boxes  = sum(n_asterias, na.rm = TRUE),
+    Northern_star_boxes  = sum(n_leptasterias, na.rm = TRUE),
+    Total_Boxes      = Sand_star_boxes + Common_star_boxes + Northern_star_boxes
   )
 print(as.data.frame(train_totals))
 
@@ -152,10 +154,10 @@ cat("\n--- Validation Split Box Counts ---\n")
 val_totals <- dat_split %>%
   filter(as.logical(as.character(is_test)) == TRUE) %>%
   summarize(
-    Jonah_Crab_Boxes = sum(n_jonah_crab, na.rm = TRUE),
-    Rock_Crab_Boxes  = sum(n_rock_crab, na.rm = TRUE),
-    Cancer_sp_Boxes  = sum(n_cancer_sp, na.rm = TRUE),
-    Total_Boxes      = Jonah_Crab_Boxes + Rock_Crab_Boxes + Cancer_sp_Boxes
+    Sand_star_boxes = sum(n_astropecten, na.rm = TRUE),
+    Common_star_boxes  = sum(n_asterias, na.rm = TRUE),
+    Northern_star_boxes  = sum(n_leptasterias, na.rm = TRUE),
+    Total_Boxes      = Sand_star_boxes + Common_star_boxes + Northern_star_boxes
   )
 print(as.data.frame(val_totals))
 cat("==================================================\n")
