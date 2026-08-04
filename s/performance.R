@@ -10,9 +10,9 @@ source("./procfunc.R")
 # ============================================================#
 # 1. Load Unified Data and Evaluate
 # ============================================================#
-models <- readRDS("../data/processed/crab_evalmulti_2426.rds")
+models <- readRDS("../data/processed/star_eval_24.rds")
 
-# Evaluate class-specific PR curves
+# Evaluate class-specific PR curves (target_classes automatically detected)
 out_pr <- evaluate_pr_models(models, stratify_region = FALSE, conf_grid = seq(0, 1, by = 0.005))
 
 pr_all      <- out_pr$pr_all
@@ -21,6 +21,9 @@ map_summary <- out_pr$map_summary
 
 print("=== Class-Specific Average Precision (AP) Summary ===")
 print(map_summary)
+
+# Identify detected classes dynamically
+detected_classes <- unique(pr_all$species)
 
 # ============================================================#
 # 2. Optimal F1 Threshold Calculation per Model/Species
@@ -63,24 +66,22 @@ p_map <- ggplot(map_summary, aes(x = model, y = Average_Precision, fill = specie
 # ============================================================#
 # 4. Multi-Class Confusion Matrix Construction (Panel D)
 # ============================================================#
-# Evaluate confusion matrices at a standard working threshold (e.g., conf = 0.10)
-# to see where classification confusion and misses happen
 conf_data <- map_dfr(names(models), function(mod_name) {
   generate_confusion_matrix(
     det_data = models[[mod_name]]$det,
     img_data = models[[mod_name]]$img,
-    threshold = 0.10 # Working threshold
+    threshold = 0.10
   ) %>% mutate(model = mod_name)
 })
 
-# Normalize within actual classes to display row-wise percentages
+# Dynamic factor assignment for actual and predicted levels
 conf_normalized <- conf_data %>%
   group_by(model, actual) %>%
   mutate(pct = n / sum(n) * 100) %>%
   ungroup() %>%
   mutate(
-    actual = factor(actual, levels = c("jonah_crab", "rock_crab", "cancer_sp", "Background")),
-    predicted = factor(predicted, levels = c("jonah_crab", "rock_crab", "cancer_sp", "Missed"))
+    actual = factor(actual, levels = c(detected_classes, "Background")),
+    predicted = factor(predicted, levels = c(detected_classes, "Missed"))
   )
 
 p_conf <- ggplot(conf_normalized, aes(x = predicted, y = actual, fill = pct)) +
@@ -114,18 +115,18 @@ bottom_row <- (p_map / p_conf) + plot_layout(heights = c(1, 2.2))
 combined_layout <- (top_row | bottom_row) + 
   plot_layout(widths = c(1.2, 1)) +
   plot_annotation(tag_levels = 'A')
+
 combined_layout
+
 # ============================================================#
 # 6. Save Outputs
 # ============================================================#
-# dir.create("../figures/diag_crab1", recursive = TRUE, showWarnings = FALSE)
-
 ggsave(
-  filename = "../figures/diag_crab_multi/2426_multiclass_crab_performance.png", 
+  filename = "../figures/diag_star1/24_star_performance.png", 
   plot = combined_layout, 
   width = 15, 
   height = 9, 
   device = "png",
   bg = "white"
 )
-print("Success! Multi-class metrics saved directly to diagnostics directory.")
+print("Success! Dynamic multi-class metrics saved successfully.")

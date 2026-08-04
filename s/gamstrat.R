@@ -6,7 +6,7 @@ source("./procfunc.R")
 # ======================================================================
 # 1. Load Data
 # ======================================================================
-models <- readRDS("../data/processed/crab_evalmulti_2426.rds")
+models <- readRDS("../data/processed/star_eval_24.rds")
 
 # Standardize names if not already done in the RDS builder
 names(models)[names(models) == "YOLO"] <- "YOLOv12"
@@ -73,16 +73,16 @@ print(selection_results_cascade_MAB, n = Inf)
 
 # Pick the best formulas based on the selection results! 
 # (You could automate this, but it is safer to manually inspect the AIC table and define them here)
-best_formula_yolo_gb  <- candidate_forms$M15_All_te
+best_formula_yolo_gb  <- candidate_forms$M10_teBoxsize
 best_formula_yolo_mab <- candidate_forms$M15_All_te
-best_formula_cascade_gb  <- candidate_forms$M14_PB_Temp
-best_formula_cascade_mab <- candidate_forms$M12_PB_Depth
+best_formula_cascade_gb  <- candidate_forms$M15_All_te
+best_formula_cascade_mab <- candidate_forms$M15_All_te
 
 # ======================================================================
 # 3. Multiclass Iterative Pipeline (Line 81 Onward)
 # ======================================================================
 model_names_to_run <- c("YOLOv12", "Cascade R-CNN")
-target_classes     <- c("jonah_crab", "rock_crab", "cancer_sp")
+target_classes     <- unique(models$YOLOv12$det$spname)
 
 for (mod_name in model_names_to_run) {
   cat("\n========================================\n")
@@ -137,12 +137,12 @@ for (mod_name in model_names_to_run) {
   }
   
   safe_mod_name <- gsub(" |-", "", mod_name)
-  saveRDS(gams, file = paste0("../data/processed/", safe_mod_name, "_crab_detgams_multi_2426.rds"))
+  saveRDS(gams, file = paste0("../data/processed/", safe_mod_name, "_star_detgams_24.rds"))
   
   # --------------------------------------------------------------------
   # C. Test GAMs on Holdout Data (Multiclass Counts)
   # --------------------------------------------------------------------
-  cat("\nTesting GAMs on holdout data across crab species...\n")
+  cat("\nTesting GAMs on holdout data across species...\n")
   eval_results <- test_calibration_gams(
     gams          = gams, 
     det_df        = mod_data$det, 
@@ -151,7 +151,7 @@ for (mod_name in model_names_to_run) {
     target_classes = target_classes
   )
   
-  saveRDS(eval_results, file = paste0("../data/processed/", safe_mod_name, "_crab_deteval_multi_2426.rds"))
+  saveRDS(eval_results, file = paste0("../data/processed/", safe_mod_name, "_star_deteval_24.rds"))
   
   cat("\nSpecies & Total Performance Metrics (Holdout Set):\n")
   print(eval_results$metrics, n = Inf)
@@ -178,15 +178,15 @@ for (mod_name in model_names_to_run) {
   plots <- generate_gam_plots(
     eval_res = eval_results, 
     model_name = mod_name, 
-    dataset_label = "2024, 2026",
+    dataset_label = "2015, 2016, 2024",
     target_classes = target_classes
   )
   
-  dir.create("../figures/diag_crab_multi", showWarnings = FALSE, recursive = TRUE)
+  dir.create("../figures/diag_star1/", showWarnings = FALSE, recursive = TRUE)
   
-  ggsave(paste0("../figures/diag_crab_multi/2426_", safe_mod_name, "_species_strat.png"), plot = plots$p_species_fit, width = 11, height = 7, bg = "white")
-  ggsave(paste0("../figures/diag_crab_multi/2426_", safe_mod_name, "_count_strat.png"), plot = plots$p_zoomed, width = 8, height = 5, bg = "white")
-  ggsave(paste0("../figures/diag_crab_multi/2426_", safe_mod_name, "_resid_strat.png"), plot = plots$p_resid, width = 8, height = 4.5, bg = "white")
-  ggsave(paste0("../figures/diag_crab_multi/2426_", safe_mod_name, "_sum_strat.png"), plot = plots$p_sum, width = 9, height = 5.5, bg = "white")}
+  ggsave(paste0("../figures/diag_star1/24_", safe_mod_name, "_species_strat.png"), plot = plots$p_species_fit, width = 11, height = 7, bg = "white")
+  ggsave(paste0("../figures/diag_star1/24_", safe_mod_name, "_count_strat.png"), plot = plots$p_zoomed, width = 8, height = 5, bg = "white")
+  ggsave(paste0("../figures/diag_star1/24_", safe_mod_name, "_resid_strat.png"), plot = plots$p_resid, width = 8, height = 4.5, bg = "white")
+  ggsave(paste0("../figures/diag_star1/24_", safe_mod_name, "_sum_strat.png"), plot = plots$p_sum, width = 9, height = 5.5, bg = "white")}
 
 cat("\nPipeline complete! All multiclass outputs saved.\n")

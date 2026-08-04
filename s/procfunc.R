@@ -7,6 +7,45 @@ library(purrr)
 library(ggplot2)
 
 # ----------------------------------------------------------------------
+# Helper: Autolocate Classes from Image and Detection Datasets
+# ----------------------------------------------------------------------
+get_target_classes <- function(img_data = NULL, det_data = NULL) {
+  img_classes <- character(0)
+  det_classes <- character(0)
+  
+  # 1. Extract potential class names from n_* count columns in img_data
+  if (!is.null(img_data)) {
+    img_classes <- sub("^n_", "", grep("^n_", names(img_data), value = TRUE))
+  }
+  
+  # 2. Extract species labels from detection ground truth and predictions
+  if (!is.null(det_data)) {
+    det_classes <- c(det_data$gt_label, det_data$spname)
+    det_classes <- unique(det_classes[!is.na(det_classes) & det_classes != ""])
+  }
+  
+  # 3. Exclude non-species metadata labels
+  reserved_words <- c("Background", "background", "Missed", "missed", "annotations", "auto", "total")
+  img_classes <- setdiff(img_classes, reserved_words)
+  det_classes <- setdiff(det_classes, reserved_words)
+  
+  # 4. Determine final species: Intersect if both datasets exist, otherwise filter
+  if (length(img_classes) > 0 && length(det_classes) > 0) {
+    # Species MUST exist in detection labels AND have a corresponding n_<class> count column
+    target_classes <- intersect(det_classes, img_classes)
+  } else if (length(det_classes) > 0) {
+    target_classes <- det_classes
+  } else {
+    target_classes <- img_classes
+  }
+  
+  # Exclude any remaining automated summary prefix columns (e.g., auto_asterias)
+  target_classes <- target_classes[!grepl("^auto_", target_classes)]
+  
+  return(target_classes)
+}
+
+# ----------------------------------------------------------------------
 # 1. Class-Specific Precision-Recall Curve Evaluator
 # ----------------------------------------------------------------------
 evaluate_pr_curve <- function(
@@ -14,11 +53,16 @@ evaluate_pr_curve <- function(
     img_df,
     conf_grid = seq(0, 1, by = 0.005), 
     model_id  = "model",
-    target_class = "jonah_crab"
+    target_class = NULL
 ) {
+  # If target_class is missing, default to the first autodetected class
+  if (is.null(target_class)) {
+    target_class <- get_target_classes(img_df, calib_df)[1]
+  }
+  
   # Calculate total ground truth for this target class across all images
   gt_col <- paste0("n_", target_class)
-  total_gt <- sum(img_df[[gt_col]], na.rm = TRUE)
+  total_gt <- if (gt_col %in% names(img_df)) sum(img_df[[gt_col]], na.rm = TRUE) else 0
   
   map_dfr(conf_grid, function(th) {
     
@@ -63,7 +107,6 @@ calculate_ap <- function(recall, precision) {
   
   if (length(r) < 2) return(NA_real_)
   
-  # Order by recall ascending to calculate area correctly
   ord <- order(r)
   r <- r[ord]
   p <- p[ord]
@@ -76,10 +119,16 @@ calculate_ap <- function(recall, precision) {
 # ----------------------------------------------------------------------
 evaluate_pr_models <- function(
     models_list, 
+    target_classes = NULL,
     conf_grid = seq(0, 1, by = 0.005),
     stratify_region = FALSE
 ) {
-  target_classes <- c("jonah_crab", "rock_crab", "cancer_sp")
+  # Auto-detect target classes across all models if not explicitly passed
+  if (is.null(target_classes)) {
+    target_classes <- map(models_list, function(m) {
+      get_target_classes(m$img, m$det)
+    }) %>% unlist() %>% unique()
+  }
   
   pr_all <- map_dfr(names(models_list), function(mod_name) {
     img_data <- models_list[[mod_name]]$img
@@ -133,12 +182,17 @@ generate_confusion_matrix <- function(
     det_data, 
     img_data, 
     threshold, 
-    target_classes = c("jonah_crab", "rock_crab", "cancer_sp")
+    target_classes = NULL
 ) {
+  # Auto-detect target classes if not specified
+  if (is.null(target_classes)) {
+    target_classes <- get_target_classes(img_data, det_data)
+  }
+  
   # Filter predictions above the selected threshold
   df_th <- det_data %>% filter(conf >= threshold)
   
-  # 1. Matches & Misclassifications (True Positives and Cross-Class Errors)
+  # 1. Matches & Misclassifications
   matches <- df_th %>%
     filter(truedetect == TRUE) %>%
     mutate(
@@ -147,7 +201,7 @@ generate_confusion_matrix <- function(
     ) %>%
     count(actual, predicted)
   
-  # 2. Background False Positives (Predicted as a species, but actually Background)
+  # 2. Background False Positives
   fps <- df_th %>%
     filter(truedetect == FALSE) %>%
     mutate(
@@ -156,11 +210,14 @@ generate_confusion_matrix <- function(
     ) %>%
     count(actual, predicted)
   
-  # 3. Missed Ground Truths (False Negatives) - Modernized dplyr syntax & base R string removal
+  # 3. Missed Ground Truths (False Negatives)
+  gt_cols <- paste0("n_", target_classes)
+  valid_gt_cols <- intersect(gt_cols, names(img_data))
+  
   total_manual <- img_data %>%
-    summarise(across(all_of(paste0("n_", target_classes)), \(x) sum(x, na.rm = TRUE))) %>%
+    summarise(across(all_of(valid_gt_cols), \(x) sum(x, na.rm = TRUE))) %>%
     pivot_longer(everything(), names_to = "species", values_to = "total_gt") %>%
-    mutate(actual = sub("^n_", "", species)) # Uses base R 'sub' instead of 'str_remove'
+    mutate(actual = sub("^n_", "", species))
   
   # Count unique GT boxes successfully matched above threshold
   detected_counts <- df_th %>%
@@ -177,14 +234,14 @@ generate_confusion_matrix <- function(
     ) %>%
     select(actual, predicted, n)
   
-  # Combine into a structured grid layout
+  # Combine into structured grid layout
   all_counts <- bind_rows(matches, fps, fns)
   
   grid <- expand_grid(
     actual = c(target_classes, "Background"),
     predicted = c(target_classes, "Missed")
   ) %>%
-    filter(!(actual == "Background" & predicted == "Missed")) # Background cannot be missed
+    filter(!(actual == "Background" & predicted == "Missed"))
   
   grid %>%
     left_join(all_counts, by = c("actual", "predicted")) %>%

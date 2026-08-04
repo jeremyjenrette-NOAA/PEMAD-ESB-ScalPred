@@ -6,7 +6,7 @@ library(stringr)
 # ======================================================================
 # 1. Master Metadata Prep
 # ======================================================================
-meta <- read.csv("../data/raw/dataset_split_crab_multiclass.csv") %>%
+meta <- read.csv("../data/raw/dataset_split_star.csv") %>%
   clean_names() %>%
   rename(n_annotations = total_annotations) %>% 
   mutate(
@@ -40,9 +40,7 @@ process_model <- function(det_csv_path, meta_df, dets_df) {
       # --- Robust Boolean Coercion for YOLO/Cascade Predictions ---
       truedetect = as.logical(as.character(truedetect)),
       spname = tolower(spname)
-    ) %>%
-    # Filter for any of our three target crab species (using valid R syntax)
-    filter(spname %in% c("jonah_crab", "rock_crab", "cancer_sp"))
+    )
   
   # --- Isolate only the images used during evaluation ---
   test_meta_df <- meta_df %>% 
@@ -59,10 +57,10 @@ process_model <- function(det_csv_path, meta_df, dets_df) {
     pivot_wider(names_from = species_cat, values_from = n, values_fill = 0L)
   
   # Structural safeguard: Ensure all target auto columns exist even if unpredicted
-  auto_cols <- c("n_auto_jonah_crab", "n_auto_rock_crab", "n_auto_cancer_sp")
-  for (col in auto_cols) {
-    if (!col %in% names(auto_species)) auto_species[[col]] <- 0L
-  }
+  # auto_cols <- c("n_auto_jonah_crab", "n_auto_rock_crab", "n_auto_cancer_sp")
+  # for (col in auto_cols) {
+  #   if (!col %in% names(auto_species)) auto_species[[col]] <- 0L
+  # }
   
   # Combine counts into the comprehensive image-level summary
   img_df <- test_meta_df %>%
@@ -70,7 +68,7 @@ process_model <- function(det_csv_path, meta_df, dets_df) {
     left_join(auto_species, by = "image_id") %>%
     mutate(
       n_auto = replace_na(n_auto, 0L),
-      across(all_of(auto_cols), ~ replace_na(.x, 0L)),
+      # across(all_of(auto_cols), ~ replace_na(.x, 0L)),
       man_density = n_annotations / field_of_view_sq_meter,
       auto_density = n_auto / field_of_view_sq_meter
     )
@@ -86,10 +84,10 @@ process_model <- function(det_csv_path, meta_df, dets_df) {
 # 3. Process Models and Bundle
 # ======================================================================
 print("Processing YOLO...")
-yolo_data <- process_model("../data/raw/crab_eval_yolov12_multi/autotest2426_yolo12n.csv", meta, dets)
+yolo_data <- process_model("../data/raw/star_eval_yolov12/autotest24_yolo12n.csv", meta, dets)
 
 print("Processing Cascade R-CNN...")
-cas_data <- process_model("../data/raw/crab_eval_cascade_multi/autotest2426_viame_cascade.csv", meta, dets)
+cas_data <- process_model("../data/raw/star_eval_viame/autotest24_viame_cascade.csv", meta, dets)
 
 # Combine into cohesive nested analytical lists
 model_results <- list(
@@ -97,5 +95,5 @@ model_results <- list(
   `Cascade R-CNN` = cas_data
 )
 
-saveRDS(model_results, file = "../data/processed/crab_evalmulti_2426.rds")
+saveRDS(model_results, file = "../data/processed/star_eval_24.rds")
 print("Success! Multi-class data structures successfully unified with standardized logicals.")
