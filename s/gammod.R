@@ -27,6 +27,7 @@ image_candidate_forms <- list(
   M01_YoloRaw     = n_annotations ~ s(pred_yolo),
   M02_CascadeRaw  = n_annotations ~ s(pred_cascade),
   M03_MeanRaw     = n_annotations ~ s(pred_mean),
+  M035_SumRaw     = n_annotations ~ s(pred_sum),
   
   # STAGE 2: Log-Transformed Single Predictors
   M04_YoloLog     = n_annotations ~ s(log_yolo_pred),
@@ -56,13 +57,15 @@ print(compare_image_gams(img_combined, image_candidate_forms, "MAB"))
 
 # Assign the winners dynamically based on your tests!
 # M09_MeanDiff best for total count error
-best_syn_gb  <- image_candidate_forms$M09_MeanCasDiff
-best_syn_mab <- image_candidate_forms$M09_MeanCasDiff
+best_syn_gb  <- image_candidate_forms$M14_Champion
+best_syn_mab <- image_candidate_forms$M14_Champion
 # ======================================================================
 # 3. Train and Test Final Synergistic Model
 # ======================================================================
 syn_gams <- fit_synergy_gams(img_combined, best_syn_gb, best_syn_mab)
 syn_eval <- test_synergy_gams(syn_gams, img_combined)
+
+saveRDS(syn_gams, file = paste0("../data/processed/Syngams_2226.rds"))
 # ======================================================================
 # 4. The 12-Panel Plot Generation
 # ======================================================================
