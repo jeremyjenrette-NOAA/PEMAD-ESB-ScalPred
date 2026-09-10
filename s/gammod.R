@@ -5,22 +5,21 @@ library(grid)
 library(mgcv)
 source("./gamfunc.R")
 
-# 1. Load your master metadata and previously evaluated model results
+# 1. Load metadata and past evaluation results
 meta <- read.csv("../data/raw/dataset_split_2226.csv") %>% 
   janitor::clean_names() %>%
   mutate(image_id = stringr::str_remove(imagename, "\\.[A-Za-z0-9]+$")) %>%
   distinct(image_id, .keep_all = TRUE)
 
-# (Assuming yolo_eval and cas_eval were saved from your gamstrat.R output)
 yolo_eval <- readRDS("../data/processed/YOLOv12_deteval_2226.rds")
 cas_eval  <- readRDS("../data/processed/CascadeR-CNN_deteval_2226.rds")
 
-# 2. Build Synergistic Dataset
-img_combined <- build_synergy_dataset(yolo_eval, cas_eval, meta) 
-table(img_combined$dataset)
+# 2. Build Synergistic Dataset & ensure log_ratio is defined for M16_PropDiff
+img_combined <- build_synergy_dataset(yolo_eval, cas_eval, meta) %>%
+  mutate(log_ratio = log((pred_yolo + 1) / (pred_cascade + 1)))
 
 # ======================================================================
-# 2. Define Systematic Synergistic Candidate Formulas (Regionally Stratified)
+# 2. Define Systematic Synergistic Candidate Formulas
 # ======================================================================
 image_candidate_forms <- list(
   # STAGE 1: Single Model Raw Baselines
@@ -34,31 +33,73 @@ image_candidate_forms <- list(
   M05_CascadeLog  = n_annotations ~ s(log_cascade_pred),
   M06_MeanLog     = n_annotations ~ s(log_pred_mean),
   
-  # STAGE 3: Adding the Disagreement/Difference Covariate
+  # STAGE 3: Disagreement/Difference Covariate
   M07_YoloDiff    = n_annotations ~ s(log_yolo_pred, pred_diff),
   M08_CascadeDiff = n_annotations ~ s(log_cascade_pred, pred_diff),
   M09_MeanDiff    = n_annotations ~ s(log_pred_mean, pred_diff),
-  M09_MeanCasDiff    = n_annotations ~ s(log_pred_mean, pred_diff) + s(log_cascade_pred, pred_diff),
+  M09_MeanCasDiff = n_annotations ~ s(log_pred_mean, pred_diff) + s(log_cascade_pred, pred_diff),
   M10_YoloLogDiff = n_annotations ~ s(log_yolo_pred, log_pred_diff),
-  
   
   # STAGE 4: Multi-Model Synergy
   M11_Additive    = n_annotations ~ s(log_yolo_pred) + s(log_cascade_pred) + s(log_pred_diff),
   M12_Tensor      = n_annotations ~ te(log_yolo_pred, log_cascade_pred),
   M13_TensorDiff  = n_annotations ~ ti(log_yolo_pred, log_cascade_pred) + log_pred_diff,
-  M14_Champion    = n_annotations ~ s(log_yolo_pred, log_pred_diff) + s(log_cascade_pred, log_pred_diff)
+  M14_Champion    = n_annotations ~ s(log_yolo_pred, log_pred_diff) + s(log_cascade_pred, log_pred_diff),
+  # M15_TensorDiff2 = n_annotations ~ ti(log_yolo_pred, log_cascade_pred) + 
+  #   ti(log_cascade_pred, log_pred_diff, k = c(6,6)) + 
+  #   ti(log_yolo_pred, log_pred_diff, k = c(6,6)),
+  
+  # STAGE 5: Advanced ANOVA & Ratio Models
+  M15b_FullDecomp = n_annotations ~ s(log_yolo_pred, k = 8) + 
+    s(log_cascade_pred, k = 8) + 
+    s(log_pred_diff, k = 8) + 
+    ti(log_yolo_pred, log_cascade_pred, k = c(6, 6)) + 
+    ti(log_cascade_pred, log_pred_diff, k = c(6, 6)) + 
+    ti(log_yolo_pred, log_pred_diff, k = c(6, 6)),
+  
+  M16_PropDiff    = n_annotations ~ s(log_yolo_pred, k = 8) + 
+    s(log_cascade_pred, k = 8) + 
+    s(log_ratio, k = 8) + 
+    ti(log_yolo_pred, log_cascade_pred, k = c(6, 6)) + 
+    ti(log_yolo_pred, log_ratio, k = c(6, 6)) + 
+    ti(log_cascade_pred, log_ratio, k = c(6, 6)),
+  
+  M17_Tensor3D    = n_annotations ~ te(log_yolo_pred, log_cascade_pred, log_pred_diff, k = c(5, 5, 5))
 )
 
+# ======================================================================
+# Helper Function: Automated Formula Selection
+# ======================================================================
+select_best_synergy_model <- function(eval_table, candidate_list, metric = "AIC") {
+  # Sort table by designated metric
+  sorted_table <- eval_table %>% arrange(.data[[metric]])
+  
+  best_id   <- sorted_table$Model_ID[1]
+  best_score <- round(sorted_table[[metric]][1], 2)
+  best_r2    <- round(sorted_table$R2_Train[1], 3)
+  
+  cat(sprintf("  [Selected] %s (by %s = %g | R² = %g)\n", best_id, metric, best_score, best_r2))
+  
+  return(candidate_list[[best_id]])
+}
+
+# ======================================================================
+# Run Evaluation and Dynamically Assign Best Models
+# ======================================================================
 cat("--- Synergy Selection: Georges Bank ---\n")
-print(compare_image_gams(img_combined, image_candidate_forms, "GB"))
+selection_gb <- compare_image_gams(img_combined, image_candidate_forms, "GB")
+print(selection_gb, n = Inf)
 
-cat("--- Synergy Selection: Mid-Atlantic Bight ---\n")
-print(compare_image_gams(img_combined, image_candidate_forms, "MAB"))
+best_syn_gb <- select_best_synergy_model(selection_gb, image_candidate_forms, metric = "AIC")
 
-# Assign the winners dynamically based on your tests!
-# M09_MeanDiff best for total count error
-best_syn_gb  <- image_candidate_forms$M14_Champion
-best_syn_mab <- image_candidate_forms$M14_Champion
+cat("\n--- Synergy Selection: Mid-Atlantic Bight ---\n")
+selection_mab <- compare_image_gams(img_combined, image_candidate_forms, "MAB")
+print(selection_mab, n = Inf)
+
+best_syn_mab <- select_best_synergy_model(selection_mab, image_candidate_forms, metric = "AIC")
+
+# best_syn_gb <- image_candidate_forms$M15b_FullDecomp
+# best_syn_mab <- image_candidate_forms$M15b_FullDecomp
 # ======================================================================
 # 3. Train and Test Final Synergistic Model
 # ======================================================================
@@ -184,7 +225,14 @@ ggsave(
   device = "png",
   bg = "white"
 )
-
+ggsave(
+  filename = "~/saltnoaa/presentations/figures/2226_12panel_calibration_summary.png",
+  plot = final_plot,
+  width = 17,
+  height = 12,
+  device = "png",
+  bg = "white"
+)
 
 
 ###########################################################################
@@ -270,7 +318,7 @@ p_sum_final <- ggplot(sum_df, aes(x = Method, y = Value, fill = Method)) +
     axis.text.x = element_text(angle = 35, hjust = 1, size = 11, face = "plain"),
     plot.title = element_text(face = "bold", hjust = 0.5)
   )
-
+p_sum_final
 # Save the final render
-ggsave("../figures/ms_figures/2226_final_abundance_summary.png", 
+ggsave("../figures/ms_figures/2226_final_abundance_summary.png",
        plot = p_sum_final, width = 8, height = 6, dpi = 300)
