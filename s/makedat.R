@@ -6,7 +6,7 @@ library(stringr)
 # ======================================================================
 # 1. Master Metadata Prep
 # ======================================================================
-meta <- read.csv("../data/raw/dataset_split_crab_multiclass.csv") %>%
+meta <- read.csv("../data/raw/dataset_split_star.csv") %>%
   clean_names() %>%
   rename(n_annotations = total_annotations) %>% 
   mutate(
