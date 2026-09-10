@@ -61,7 +61,6 @@ yolo_data <- process_model("../data/raw/2226scallop_yolo12n_441288/eval/autotest
 print("Processing Cascade R-CNN...")
 cas_data <- process_model("../data/raw/2226scallop_viame_441305/autotest2226_viame_cascade.csv", meta)
 
-# Rename them right here:
 model_results <- list(
   `YOLOv12` = yolo_data,
   `Cascade R-CNN` = cas_data

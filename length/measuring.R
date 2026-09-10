@@ -249,6 +249,12 @@ ggsave(
   units = "in",
   device = "pdf"
 )
+ggsave(
+  filename = "~/saltnoaa/presentations/figures/2226_sizeclasses.png",
+  plot = plot_grid_ms,
+  width = 11,
+  height = 8
+)
 
 # ==============================================================================
 # 7. Global Distribution Likeness Metrics (Pooled Empirical OVL)

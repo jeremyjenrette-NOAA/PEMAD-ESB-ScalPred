@@ -300,5 +300,5 @@ combined_manuscript_plot <- row1 / p_map_gb / bottom_row +
 # Export file as requested
 ggsave(combined_manuscript_plot, filename = "../figures/ms_figures/2226_spatial_strat_final.pdf", 
        width = 14, height = 15)
-ggsave(combined_manuscript_plot, filename = "~/Downloads/2226_spatial_strat_final.pdf", 
+ggsave(combined_manuscript_plot, filename = "~/saltnoaa/presentations/figures/2226_spatial_strat_final.png", 
        width = 14, height = 15)

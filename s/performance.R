@@ -156,3 +156,10 @@ ggsave(
   device = "pdf",
   bg = "white"
 )
+# ggsave(
+#   filename = "~/saltnoaa/presentations/figures/2226_model_performance_summary.png", 
+#   plot = combined_2panel, 
+#   width = 11, 
+#   height = 5, 
+#   bg = "white"
+# )
