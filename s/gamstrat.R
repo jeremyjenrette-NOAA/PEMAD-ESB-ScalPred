@@ -31,29 +31,108 @@ candidate_forms <- list(
   M10_teBoxsize = truedetect ~ spname + te(conf, boxsize, k = 5) + te(conf, altitude, k = 5) + s(latitude, longitude, k = 7),
   
   # STAGE 3: The "Previous Best" & Fine-Tuning
+<<<<<<< HEAD
   M11_PrevBest  = truedetect ~ spname + te(conf, altitude, k = 5) + s(latitude, longitude, k = 7) + te(conf, field_of_view_sq_meter, k = 7) + te(conf, boxsize, k = 7),
   M12_PB_Depth  = truedetect ~ spname + te(conf, altitude, k = 5) + s(latitude, longitude, k = 7) + te(conf, field_of_view_sq_meter, k = 7) + te(conf, boxsize, k = 7) + s(bottom_depth, k = 5),
   M13_PB_Backsc = truedetect ~ spname + te(conf, altitude, k = 5) + s(latitude, longitude, k = 7) + te(conf, field_of_view_sq_meter, k = 7) + te(conf, boxsize, k = 7) + s(fluorometer_backscatter_ntu, k = 5),
   M14_PB_Temp   = truedetect ~ spname + te(conf, altitude, k = 5) + s(latitude, longitude, k = 7) + te(conf, field_of_view_sq_meter, k = 7) + te(conf, boxsize, k = 7) + s(ctd_temperature_celsius, k = 5),
   M15_All_te    = truedetect ~ spname + te(conf, altitude, k = 5) + s(latitude, longitude, k = 7) + te(conf, field_of_view_sq_meter, k = 7) + te(conf, boxsize, k = 7) + te(conf, bottom_depth, k = 5)
+=======
+  M11_PrevBest  = truedetect ~ te(conf, altitude, k = 5) + s(latitude, longitude, k = 7) + te(conf, field_of_view_sq_meter, k = 7) + te(conf, boxsize, k = 7),
+  M12_PB_Depth  = truedetect ~ te(conf, altitude, k = 5) + s(latitude, longitude, k = 7) + te(conf, field_of_view_sq_meter, k = 7) + te(conf, boxsize, k = 7) + s(bottom_depth, k = 5),
+  M13_PB_Backsc = truedetect ~ te(conf, altitude, k = 5) + s(latitude, longitude, k = 7) + te(conf, field_of_view_sq_meter, k = 7) + te(conf, boxsize, k = 7) + s(fluorometer_backscatter_ntu, k = 5),
+  M14_PB_Temp   = truedetect ~ te(conf, altitude, k = 5) + s(latitude, longitude, k = 7) + te(conf, field_of_view_sq_meter, k = 7) + te(conf, boxsize, k = 7) + s(ctd_temperature_celsius, k = 5),
+  M15_All_te    = truedetect ~ te(conf, altitude, k = 5) + s(latitude, longitude, k = 7) + te(conf, field_of_view_sq_meter, k = 7) + te(conf, boxsize, k = 7) + te(conf, bottom_depth, k = 5),
+  
+  # STAGE 4: 3D Multi-Way Physical & Optical Scale Tensors
+  # Jointly models pixel boxsize, camera height/FOV, and detector confidence simultaneously
+  M16_3D_OpticsBox = truedetect ~ te(conf, altitude, boxsize, k = c(5, 5, 5)) + 
+    s(latitude, longitude, k = 7) + 
+    s(bottom_depth, k = 5),
+  M17_3D_FOVBox    = truedetect ~ te(conf, field_of_view_sq_meter, boxsize, k = c(5, 5, 5)) + 
+    s(latitude, longitude, k = 7) + 
+    s(bottom_depth, k = 5),
+  
+  # STAGE 5: Combined Environmental Synergy
+  # Evaluates water-column clarity (backscatter) and temperature together rather than separately
+  M18_FullEnviron  = truedetect ~ te(conf, altitude, k = 5) + 
+    te(conf, boxsize, k = 7) + 
+    s(latitude, longitude, k = 7) + 
+    s(bottom_depth, k = 5) + 
+    s(ctd_temperature_celsius, k = 5) + 
+    s(fluorometer_backscatter_ntu, k = 5),
+  
+  # STAGE 6: Tensor Interaction ANOVA Decomposition (`ti`)
+  # Explicitly separates univariate smooths from pure interaction terms to prevent main-effect bias
+  M19_ANOVA_Optics = truedetect ~ s(conf, k = 7) + 
+    s(altitude, k = 5) + 
+    s(boxsize, k = 5) + 
+    ti(conf, altitude, k = c(5, 5)) + 
+    ti(conf, boxsize, k = c(5, 5)) + 
+    s(latitude, longitude, k = 7) + 
+    s(bottom_depth, k = 5),
+  
+  # STAGE 7: Fine-Scale Spatial Smooths & Overlap Quality (`iu`)
+  # Leverages high-knot spatial splines for localized bed density + bounding box overlap quality
+  M20_HighSpatial  = truedetect ~ te(conf, altitude, k = 5) + 
+    te(conf, boxsize, k = 7) + 
+    s(latitude, longitude, k = 15) + 
+    s(bottom_depth, k = 5) + 
+    s(ctd_temperature_celsius, k = 5)
+>>>>>>> 099e1fe8751b6dd1e92581670bbe7f7234962132
 )
 
+# Append to candidate_forms in your script
+candidate_forms_v2 <- c(candidate_forms, list(
+  
+  # STAGE 4: 3D Multi-Way Tensor Interactions
+  # Captures tri-variate interaction between Confidence, Camera Altitude, and Bounding Box Size
+  M16_3D_Optics = truedetect ~ te(conf, altitude, boxsize, k = c(5, 5, 5)) + 
+    te(conf, field_of_view_sq_meter, k = 5) + 
+    s(latitude, longitude, k = 7) + 
+    s(bottom_depth, k = 5),
+  
+  # STAGE 5: Physical Scale Interaction + Environmental Drivers
+  # Interacts Confidence with optical FOV and Box Size simultaneously
+  M17_Physical_Scale = truedetect ~ te(conf, boxsize, field_of_view_sq_meter, k = c(5, 5, 5)) + 
+    te(conf, altitude, k = 5) + 
+    s(latitude, longitude, k = 7) + 
+    s(ctd_temperature_celsius, k = 5),
+  
+  # Higher resolution spatial smoothing to capture localized habitat density effects
+  M18_HighK_Spatial = truedetect ~ te(conf, altitude, k = 5) + 
+    te(conf, field_of_view_sq_meter, k = 7) + 
+    te(conf, boxsize, k = 7) + 
+    s(latitude, longitude, k = 15) + 
+    s(ctd_temperature_celsius, k = 5),
+  
+  # Full Environmental & Optical Interaction
+  M19_Full_OpticEnv = truedetect ~ te(conf, altitude, k = 5) + 
+    te(conf, field_of_view_sq_meter, k = 7) + 
+    te(conf, boxsize, k = 7) + 
+    te(conf, bottom_depth, k = 5) + 
+    s(ctd_temperature_celsius, k = 5) + 
+    s(fluorometer_backscatter_ntu, k = 5) + 
+    s(latitude, longitude, k = 7)
+))
 # ======================================================================
 # 3. Model Selection (Example: Testing structures on YOLO for Georges Bank)
 # ======================================================================
 cat("--- Running Model Selection Phase ---\n")
-selection_results_yolo_GB <- compare_detection_gams(
-  det_df = models$YOLOv12$det, 
-  candidate_formulas = candidate_forms, 
-  region_focus = "GB"
-)
+# Extract best formulas programmatically by lowest AIC
+get_best_formula <- function(selection_results, candidate_list) {
+  top_model_id <- selection_results$Model_ID[1]
+  cat("  -> Dynamic Best Selection:", top_model_id, "(AIC =", round(selection_results$AIC[1], 1), ")\n")
+  return(candidate_list[[top_model_id]])
+}
 
-selection_results_yolo_MAB <- compare_detection_gams(
-  det_df = models$YOLOv12$det, 
-  candidate_formulas = candidate_forms, 
-  region_focus = "MAB"
-)
+# Dynamic Assignment
+best_formula_yolo_gb     <- get_best_formula(selection_results_yolo_GB, candidate_forms_v2)
+best_formula_yolo_mab    <- get_best_formula(selection_results_yolo_MAB, candidate_forms_v2)
+best_formula_cascade_gb  <- get_best_formula(selection_results_cascade_GB, candidate_forms_v2)
+best_formula_cascade_mab <- get_best_formula(selection_results_cascade_MAB, candidate_forms_v2)
 
+<<<<<<< HEAD
 selection_results_cascade_GB <- compare_detection_gams(
   det_df = models$`Cascade R-CNN`$det, 
   candidate_formulas = candidate_forms, 
@@ -77,6 +156,19 @@ best_formula_yolo_gb  <- candidate_forms$M15_All_te
 best_formula_yolo_mab <- candidate_forms$M15_All_te
 best_formula_cascade_gb  <- candidate_forms$M14_PB_Temp
 best_formula_cascade_mab <- candidate_forms$M12_PB_Depth
+=======
+# print(selection_results_yolo_GB, n = Inf)
+# print(selection_results_yolo_MAB, n = Inf)
+# print(selection_results_cascade_GB, n = Inf)
+# print(selection_results_cascade_MAB, n = Inf)
+
+# Pick the best formulas based on the selection results! 
+# (You could automate this, but it is safer to manually inspect the AIC table and define them here)
+# best_formula_yolo_gb  <- candidate_forms$M19_ANOVA_Optics
+# best_formula_yolo_mab <- candidate_forms$M19_ANOVA_Optics
+# best_formula_cascade_gb  <- candidate_forms$M19_ANOVA_Optics
+# best_formula_cascade_mab <- candidate_forms$M19_ANOVA_Optics
+>>>>>>> 099e1fe8751b6dd1e92581670bbe7f7234962132
 
 # ======================================================================
 # 3. Multiclass Iterative Pipeline (Line 81 Onward)

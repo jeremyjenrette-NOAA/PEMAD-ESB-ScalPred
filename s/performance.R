@@ -128,4 +128,14 @@ ggsave(
   device = "png",
   bg = "white"
 )
+<<<<<<< HEAD
 print("Success! Multi-class metrics saved directly to diagnostics directory.")
+=======
+# ggsave(
+#   filename = "~/saltnoaa/presentations/figures/2226_model_performance_summary.png", 
+#   plot = combined_2panel, 
+#   width = 11, 
+#   height = 5, 
+#   bg = "white"
+# )
+>>>>>>> 099e1fe8751b6dd1e92581670bbe7f7234962132

@@ -385,6 +385,7 @@ build_synergy_dataset_multi <- function(yolo_eval, cas_eval, meta_df,
   # 1. Identify common image IDs across both holdout sets
   common_ids <- intersect(yolo_eval$img_eval$image_id, cas_eval$img_eval$image_id)
   
+<<<<<<< HEAD
   gt_cols <- paste0("n_", target_classes)
   
   # 2. Extract YOLO predictions & Ground Truth counts
@@ -421,6 +422,30 @@ build_synergy_dataset_multi <- function(yolo_eval, cas_eval, meta_df,
   
   # 6. Safely attach environmental metadata (Drop ALL existing columns to prevent .x/.y suffixes)
   existing_cols <- setdiff(names(img_combined), "image_id")
+=======
+  img_combined <- yolo_eval$img_eval %>%
+    filter(image_id %in% common_ids) %>%
+    select(image_id, region, dataset, n_annotations, pred_yolo = predicted_number) %>%
+    left_join(
+      cas_eval$img_eval %>%
+        filter(image_id %in% common_ids) %>%
+        select(image_id, pred_cascade = predicted_number),
+      by = "image_id"
+    ) %>%
+    mutate(
+      pred_mean = (pred_yolo + pred_cascade) / 2,
+      pred_diff = pred_cascade - pred_yolo,
+      pred_sum  = pred_yolo + pred_cascade,
+      log_yolo_pred = log1p(pred_yolo),
+      log_cascade_pred = log1p(pred_cascade),
+      log_pred_mean = log1p(pred_mean),
+      log_pred_sum = log1p(pred_sum),
+      # log_pred_diff = log1p(abs(pred_diff)),
+      log_true_number = log1p(n_annotations + 1e-6),
+      log_pred_diff = log1p(abs(pred_cascade - pred_yolo)),
+      log_ratio = log((pred_yolo + 1) / (pred_cascade + 1))
+    )
+>>>>>>> 099e1fe8751b6dd1e92581670bbe7f7234962132
   
   img_combined <- img_combined %>%
     left_join(
@@ -507,30 +532,25 @@ test_synergy_gams_multi <- function(gams_multi, img_combined,
 # ======================================================================
 # 5. Compare Candidate Synergistic Image-Level GAMs (Stratified)
 # ======================================================================
+# Fit candidate models using Tweedie distribution to match final training
 compare_image_gams <- function(img_combined, candidate_formulas, region_focus = "GB") {
-  
   train_data <- img_combined %>% filter(dataset == "test_GAM_train", region == region_focus)
-  
-  cat("\nEvaluating", length(candidate_formulas), "synergistic models for", region_focus, "(n =", nrow(train_data), ")...\n")
   
   results <- purrr::map_dfr(names(candidate_formulas), function(mod_name) {
     form <- candidate_formulas[[mod_name]]
-    fit <- gam(form, family = nb(), data = train_data, method = "REML")
-    
-    # Generate predictions once to use for both RMSE and R-squared
+    fit <- gam(form, family = tw(link = "log"), data = train_data, method = "REML")
     preds <- predict(fit, type = "response")
     
     tibble(
       Model_ID = mod_name,
-      Formula = deparse(form),
-      AIC = AIC(fit),
+      Formula  = deparse(form),
+      AIC      = AIC(fit),
       Deviance_Explained = summary(fit)$dev.expl,
       RMSE_Train = sqrt(mean((train_data$n_annotations - preds)^2)),
-      R2_Train = summary(lm(train_data$n_annotations ~ preds))$adj.r.squared
+      R2_Train   = summary(lm(train_data$n_annotations ~ preds))$adj.r.squared
     )
   })
   
-  # Sort by lowest AIC
   return(results %>% arrange(AIC))
 }
 
@@ -542,10 +562,10 @@ fit_synergy_gams <- function(img_combined, formula_gb, formula_mab) {
   train_data <- img_combined %>% filter(dataset == "test_GAM_train")
   
   cat("  Fitting Georges Bank Synergy GAM...\n")
-  m_gb <- gam(formula_gb, family = nb(), data = train_data %>% filter(region == "GB"), method = "REML")
+  m_gb <- gam(formula_gb, family = tw(link = "log"), data = train_data %>% filter(region == "GB"), method = "REML")
   
   cat("  Fitting Mid-Atlantic Bight Synergy GAM...\n")
-  m_mab <- gam(formula_mab, family = nb(), data = train_data %>% filter(region == "MAB"), method = "REML")
+  m_mab <- gam(formula_mab, family = tw(link = "log"),  data = train_data %>% filter(region == "MAB"), method = "REML")
   
   return(list(GB = m_gb, MAB = m_mab))
 }
