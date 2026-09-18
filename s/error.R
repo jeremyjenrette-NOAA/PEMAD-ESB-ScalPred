@@ -159,12 +159,17 @@ print(cov_assembly)
 
 # F. Save the figure
 ggsave(
-  filename = "../figures/diag_crab1/2426_crab_covariate_error_comparison.pdf",
+  filename = "../figures/ms_figures/2226_covariate_error_comparison.pdf",
   plot = cov_assembly,
   width = 11.5, # Increased width slightly to accommodate 4 columns in the top row
   height = 8
 )
-
+ggsave(
+  filename = "~/saltnoaa/presentations/figures/2226_covariate_error_comparison.png",
+  plot = cov_assembly,
+  width = 12,
+  height = 8
+)
 
 # ======================================================================
 # Diagnostic: Quantifying Error Volatility and Covariate Stability
