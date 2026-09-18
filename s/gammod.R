@@ -3,6 +3,8 @@ library(ggplot2)
 library(patchwork)
 library(grid)
 library(mgcv)
+library(forcats) 
+library(latex2exp)
 source("./gamfunc.R")
 
 # 1. Load metadata and past evaluation results
@@ -99,7 +101,7 @@ print(selection_mab, n = Inf)
 best_syn_mab <- select_best_synergy_model(selection_mab, image_candidate_forms, metric = "AIC")
 
 # best_syn_gb <- image_candidate_forms$M15b_FullDecomp
-# best_syn_mab <- image_candidate_forms$M15b_FullDecomp
+# best_syn_mab <- image_candidate_forms$M11_Additive
 # ======================================================================
 # 3. Train and Test Final Synergistic Model
 # ======================================================================
@@ -265,11 +267,6 @@ sum_df <- data.frame(
     sum(s_test$pred_synergy, na.rm = TRUE)
   )
 )
-
-library(forcats) 
-library(latex2exp)
-library(ggplot2)
-library(dplyr)
 
 # 1. Define the Labels in the EXACT same order as the factor levels
 label_map <- c(
