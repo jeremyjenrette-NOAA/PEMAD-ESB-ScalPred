@@ -91,10 +91,7 @@ yolo_data <- process_model("../data/raw/crab_eval_yolov12_multi/autotest2426_yol
 print("Processing Cascade R-CNN...")
 cas_data <- process_model("../data/raw/crab_eval_cascade_multi/autotest2426_viame_cascade.csv", meta, dets)
 
-<<<<<<< HEAD
 # Combine into cohesive nested analytical lists
-=======
->>>>>>> 099e1fe8751b6dd1e92581670bbe7f7234962132
 model_results <- list(
   `YOLOv12` = yolo_data,
   `Cascade R-CNN` = cas_data

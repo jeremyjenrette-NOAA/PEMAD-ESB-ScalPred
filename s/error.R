@@ -164,12 +164,7 @@ ggsave(
   width = 11.5, # Increased width slightly to accommodate 4 columns in the top row
   height = 8
 )
-ggsave(
-  filename = "~/saltnoaa/presentations/figures/2226_covariate_error_comparison.png",
-  plot = cov_assembly,
-  width = 12,
-  height = 8
-)
+
 
 # ======================================================================
 # Diagnostic: Quantifying Error Volatility and Covariate Stability
