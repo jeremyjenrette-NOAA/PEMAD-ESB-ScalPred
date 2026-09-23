@@ -2,11 +2,18 @@ library(dplyr)
 library(ggplot2)
 source("./gamfunc.R")
 source("./procfunc.R")
+source("./cvfunc.R")
+
+N_FOLDS          <- 5     # must match makedat.R
+NESTED_SELECTION <- TRUE  # re-select the detection-GAM formula inside each fold
 
 # ======================================================================
 # 1. Load Data
 # ======================================================================
 models <- readRDS("../data/processed/eval_2226.rds")
+if (!"fold" %in% names(models[[1]]$det)) {
+  stop("eval_2226.rds has no `fold` column. Re-run makedat.R first.")
+}
 
 # Standardize names if not already done in the RDS builder
 names(models)[names(models) == "YOLO"] <- "YOLOv12"
@@ -71,12 +78,18 @@ print(selection_results_yolo_MAB)
 print(selection_results_cascade_GB)
 print(selection_results_cascade_MAB)
 
-# Pick the best formulas based on the selection results! 
-# (You could automate this, but it is safer to manually inspect the AIC table and define them here)
-best_formula_yolo_gb  <- candidate_forms$M15_All_te 
-best_formula_yolo_mab <- candidate_forms$M15_All_te
-best_formula_cascade_gb  <- candidate_forms$M14_PB_Temp 
-best_formula_cascade_mab <- candidate_forms$M14_PB_Temp
+# Final (full test_GAM_train) formulas: lowest AIC, the same rule applied inside
+# each cross-fitting fold, so the final model and the OOF models are selected
+# consistently. Inspect the printed tables; override below if needed.
+best_formula_yolo_gb     <- pick_best_formula(selection_results_yolo_GB, candidate_forms)
+best_formula_yolo_mab    <- pick_best_formula(selection_results_yolo_MAB, candidate_forms)
+best_formula_cascade_gb  <- pick_best_formula(selection_results_cascade_GB, candidate_forms)
+best_formula_cascade_mab <- pick_best_formula(selection_results_cascade_MAB, candidate_forms)
+# Previous manual choices:
+# best_formula_yolo_gb  <- candidate_forms$M15_All_te 
+# best_formula_yolo_mab <- candidate_forms$M15_All_te
+# best_formula_cascade_gb  <- candidate_forms$M14_PB_Temp 
+# best_formula_cascade_mab <- candidate_forms$M14_PB_Temp
 
 model_names_to_run <- c("YOLOv12", "Cascade R-CNN")
 
@@ -91,9 +104,13 @@ for (mod_name in model_names_to_run) {
   mod_data <- models[[mod_name]]
   
   # A. Dynamically Calculate Optimal F1 Thresholds per Region
-  cat("Evaluating PR to find optimal F1 thresholds...\n")
+  #    Tuned on test_GAM_train ONLY so the F1 baseline never sees holdout images.
+  cat("Evaluating PR on test_GAM_train to find optimal F1 thresholds...\n")
   temp_model_list <- list()
-  temp_model_list[[mod_name]] <- mod_data
+  temp_model_list[[mod_name]] <- list(
+    img = mod_data$img %>% filter(dataset == "test_GAM_train"),
+    det = mod_data$det %>% filter(dataset == "test_GAM_train")
+  )
   
   # We use evaluate_pr_models to get the curves, then filter for the max F1
   out_pr <- evaluate_pr_models(temp_model_list, stratify_region = TRUE)
@@ -113,23 +130,32 @@ for (mod_name in model_names_to_run) {
   f1_list <- list(GB = thresh_gb, MAB = thresh_mab)
   
   if (mod_name == "YOLOv12") {
-  
-  # B. Train Calibration GAMs
-  gams <- fit_calibration_gams(
-    det_df = mod_data$det,
-    formula_gb = best_formula_yolo_gb,
-    formula_mab = best_formula_yolo_mab
-  )
-  
-  } else{
-    
-  gams <- fit_calibration_gams(
-    det_df = mod_data$det,
-    formula_gb = best_formula_cascade_gb,
-    formula_mab = best_formula_cascade_mab
-  )
-    
+    formula_gb <- best_formula_yolo_gb;    formula_mab <- best_formula_yolo_mab
+  } else {
+    formula_gb <- best_formula_cascade_gb; formula_mab <- best_formula_cascade_mab
   }
+  
+  # B. Train Calibration GAMs on all of test_GAM_train (used for test_GAM_test)
+  gams <- fit_calibration_gams(
+    det_df = mod_data$det,
+    formula_gb = formula_gb,
+    formula_mab = formula_mab
+  )
+  
+  # B2. Cross-fit: out-of-fold pred_p for every test_GAM_train detection.
+  #     These OOF sums (not in-sample fitted values) feed the synergy GAM.
+  cat("Cross-fitting detection GAMs (K =", N_FOLDS, ", nested selection =", NESTED_SELECTION, ")...\n")
+  cf <- crossfit_detection_gams(
+    det_df             = mod_data$det,
+    candidate_formulas = candidate_forms,
+    fixed_formulas     = list(GB = formula_gb, MAB = formula_mab),
+    K                  = N_FOLDS,
+    nested_selection   = NESTED_SELECTION
+  )
+  mod_data$det <- cf$det
+  print(cf$selection)
+  write.csv(cf$selection, paste0("../data/processed/", gsub(" ", "", mod_name),
+                                 "_cv_selection_2226.csv"), row.names = FALSE)
   
   if (mod_name == "Cascade R-CNN") mod_name <- gsub("\\s", "", mod_name)
   saveRDS(gams, file = paste0("../data/processed/", mod_name, 
@@ -149,6 +175,8 @@ for (mod_name in model_names_to_run) {
                               "_deteval_2226.rds"))
   
   print(eval_results$metrics)
+  cat("Leakage check on test_GAM_train (in-sample vs out-of-fold sums):\n")
+  print(eval_results$leakage_check)
   
   # D. Generate and Save Diagnostics
   cat("Generating and saving plots...\n")

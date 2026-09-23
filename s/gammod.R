@@ -100,8 +100,8 @@ print(selection_mab, n = Inf)
 
 best_syn_mab <- select_best_synergy_model(selection_mab, image_candidate_forms, metric = "AIC")
 
-# best_syn_gb <- image_candidate_forms$M15b_FullDecomp
-# best_syn_mab <- image_candidate_forms$M11_Additive
+best_syn_gb <- image_candidate_forms$M17_Tensor3D
+best_syn_mab <- image_candidate_forms$M07_YoloDiff
 # ======================================================================
 # 3. Train and Test Final Synergistic Model
 # ======================================================================
@@ -109,6 +109,23 @@ syn_gams <- fit_synergy_gams(img_combined, best_syn_gb, best_syn_mab)
 syn_eval <- test_synergy_gams(syn_gams, img_combined)
 
 saveRDS(syn_gams, file = paste0("../data/processed/Syngams_2226.rds"))
+
+# ----------------------------------------------------------------------
+# Leakage diagnostic: refit the SAME synergy formulas on the old in-sample
+# detection-GAM sums and score both on test_GAM_test. The test inputs are
+# identical in both versions; only the stage-2 training inputs differ.
+# ----------------------------------------------------------------------
+img_insample     <- insample_synergy_dataset(img_combined)
+syn_gams_insamp  <- fit_synergy_gams(img_insample, best_syn_gb, best_syn_mab)
+syn_eval_insamp  <- test_synergy_gams(syn_gams_insamp, img_insample)
+
+leakage_synergy <- bind_rows(
+  syn_eval$metrics        %>% mutate(stage1_inputs = "out-of-fold (cross-fit)"),
+  syn_eval_insamp$metrics %>% mutate(stage1_inputs = "in-sample (previous)")
+) %>% arrange(region, stage1_inputs)
+cat("\n--- Synergy GAM holdout metrics: cross-fit vs in-sample stage-1 inputs ---\n")
+print(leakage_synergy)
+write.csv(leakage_synergy, "../data/processed/synergy_leakage_check_2226.csv", row.names = FALSE)
 # ======================================================================
 # 4. The 12-Panel Plot Generation
 # ======================================================================

@@ -96,6 +96,20 @@ test_calibration_gams <- function(gams, det_df, img_df, f1_thresholds) {
     det_eval$pred_p[mab_idx] <- predict(gams$MAB, newdata = det_eval[mab_idx, ], type = "response", na.action = na.pass)
   }
   
+  # 2b. Cross-fitting: for test_GAM_train detections, replace the in-sample
+  #     prediction with the out-of-fold one (from crossfit_detection_gams()).
+  #     test_GAM_test detections keep the full-data GAM prediction.
+  #     The in-sample value is retained for the leakage diagnostic.
+  det_eval$pred_p_insample <- det_eval$pred_p
+  if ("pred_p_oof" %in% names(det_eval)) {
+    tr_idx <- which(det_eval$dataset == "test_GAM_train")
+    det_eval$pred_p[tr_idx] <- det_eval$pred_p_oof[tr_idx]
+    n_miss <- sum(is.na(det_eval$pred_p_oof[tr_idx]) & !is.na(det_eval$pred_p_insample[tr_idx]))
+    if (n_miss > 0) warning(n_miss, " test_GAM_train detections have an in-sample but no OOF prediction.")
+  } else {
+    warning("No pred_p_oof column: test_GAM_train sums are IN-SAMPLE (leaky for the synergy GAM).")
+  }
+  
   # 3. Aggregate predictions to the image level
   img_predictions <- det_eval %>%
     group_by(image_id) %>%
@@ -103,6 +117,7 @@ test_calibration_gams <- function(gams, det_df, img_df, f1_thresholds) {
       raw_detection_number = n(),
       predicted_f1_number  = sum(conf >= regional_f1_thresh, na.rm = TRUE),
       predicted_number     = sum(pred_p, na.rm = TRUE),
+      predicted_number_insample = sum(pred_p_insample, na.rm = TRUE),
       true_positive_sum    = sum(truedetect, na.rm = TRUE),
       .groups = "drop"
     )
@@ -114,6 +129,7 @@ test_calibration_gams <- function(gams, det_df, img_df, f1_thresholds) {
       raw_detection_number = replace_na(raw_detection_number, 0),
       predicted_f1_number  = replace_na(predicted_f1_number, 0),
       predicted_number     = replace_na(predicted_number, 0),
+      predicted_number_insample = replace_na(predicted_number_insample, 0),
       true_positive_sum    = replace_na(true_positive_sum, 0),
       false_negative       = n_annotations - true_positive_sum
     )
@@ -131,7 +147,26 @@ test_calibration_gams <- function(gams, det_df, img_df, f1_thresholds) {
       .groups = "drop"
     )
   
-  return(list(img_eval = img_eval, det_eval = det_eval, metrics = metrics))
+  # 6. Leakage diagnostic on test_GAM_train: in-sample vs out-of-fold sums.
+  #    A large gap means the old (in-sample) synergy inputs were optimistic.
+  leakage_check <- img_eval %>%
+    filter(dataset == "test_GAM_train") %>%
+    group_by(region) %>%
+    summarise(
+      r2_insample   = summary(lm(n_annotations ~ predicted_number_insample))$adj.r.squared,
+      rmse_insample = sqrt(mean((n_annotations - predicted_number_insample)^2, na.rm = TRUE)),
+      r2_oof        = summary(lm(n_annotations ~ predicted_number))$adj.r.squared,
+      rmse_oof      = sqrt(mean((n_annotations - predicted_number)^2, na.rm = TRUE)),
+      mean_abs_diff = mean(abs(predicted_number - predicted_number_insample), na.rm = TRUE),
+      total_true    = sum(n_annotations),
+      total_insample = sum(predicted_number_insample),
+      total_oof     = sum(predicted_number),
+      n_images      = n(),
+      .groups = "drop"
+    )
+  
+  return(list(img_eval = img_eval, det_eval = det_eval, metrics = metrics,
+              leakage_check = leakage_check))
 }
 # ======================================================================
 # 3. Generate Diagnostic Plots (Restored Aesthetics)
@@ -234,13 +269,31 @@ build_synergy_dataset <- function(yolo_eval, cas_eval, meta_df) {
   
   img_combined <- yolo_eval$img_eval %>%
     filter(image_id %in% common_ids) %>%
-    select(image_id, region, dataset, n_annotations, pred_yolo = predicted_number) %>%
+    select(image_id, region, dataset, n_annotations, pred_yolo = predicted_number,
+           pred_yolo_insample = any_of("predicted_number_insample")) %>%
     left_join(
       cas_eval$img_eval %>%
         filter(image_id %in% common_ids) %>%
-        select(image_id, pred_cascade = predicted_number),
+        select(image_id, pred_cascade = predicted_number,
+               pred_cascade_insample = any_of("predicted_number_insample")),
       by = "image_id"
     ) %>%
+    add_synergy_features()
+  
+  # Attach environmental metadata
+  img_combined <- img_combined %>%
+    left_join(
+      meta_df %>% select(-any_of(c("region", "dataset", "n_annotations", "imagename", "fold"))), 
+      by = "image_id"
+    )
+  
+  return(img_combined)
+}
+
+# Derived synergy covariates from pred_yolo / pred_cascade.
+# Factored out so the leakage diagnostic can rebuild them from in-sample sums.
+add_synergy_features <- function(df) {
+  df %>%
     mutate(
       pred_mean = (pred_yolo + pred_cascade) / 2,
       pred_diff = pred_cascade - pred_yolo,
@@ -254,15 +307,17 @@ build_synergy_dataset <- function(yolo_eval, cas_eval, meta_df) {
       log_pred_diff = log1p(abs(pred_cascade - pred_yolo)),
       log_ratio = log((pred_yolo + 1) / (pred_cascade + 1))
     )
-  
-  # Attach environmental metadata
-  img_combined <- img_combined %>%
-    left_join(
-      meta_df %>% select(-any_of(c("region", "dataset", "n_annotations", "imagename"))), 
-      by = "image_id"
-    )
-  
-  return(img_combined)
+}
+
+# Swap in the in-sample detection-GAM sums and rebuild features: reproduces the
+# OLD (leaky) synergy training inputs for the before/after comparison.
+insample_synergy_dataset <- function(img_combined) {
+  if (!all(c("pred_yolo_insample", "pred_cascade_insample") %in% names(img_combined))) {
+    stop("In-sample columns missing; re-run gamstrat.R with the cross-fitting version of gamfunc.R.")
+  }
+  img_combined %>%
+    mutate(pred_yolo = pred_yolo_insample, pred_cascade = pred_cascade_insample) %>%
+    add_synergy_features()
 }
 
 # ======================================================================

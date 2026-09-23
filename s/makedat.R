@@ -2,6 +2,7 @@ library(dplyr)
 library(janitor)
 library(stringr)
 library(tidyr)
+source("./cvfunc.R")
 
 # ======================================================================
 # 1. Master Metadata Prep
@@ -15,6 +16,12 @@ meta <- read.csv("../data/raw/dataset_split_2226.csv") %>%
     is_test = as.logical(is_test)
   ) %>%
   distinct(image_id, .keep_all = TRUE)
+
+# Cross-fitting folds for the detection-GAM stage (see cvfunc.R).
+# Whole transect blocks, assigned within region, high-density blocks balanced.
+# Assigned ONCE here so every detector shares the same folds.
+N_FOLDS <- 5
+meta <- assign_folds(meta, K = N_FOLDS, seed = 2226)
 
 # ======================================================================
 # 2. Unified Processing Function
