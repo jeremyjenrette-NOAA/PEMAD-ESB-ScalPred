@@ -100,8 +100,8 @@ print(selection_mab, n = Inf)
 
 best_syn_mab <- select_best_synergy_model(selection_mab, image_candidate_forms, metric = "AIC")
 
-best_syn_gb <- image_candidate_forms$M17_Tensor3D
-best_syn_mab <- image_candidate_forms$M07_YoloDiff
+# best_syn_gb <- image_candidate_forms$M17_Tensor3D
+# best_syn_mab <- image_candidate_forms$M07_YoloDiff
 # ======================================================================
 # 3. Train and Test Final Synergistic Model
 # ======================================================================
