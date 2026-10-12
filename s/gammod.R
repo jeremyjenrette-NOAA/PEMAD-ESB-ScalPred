@@ -7,6 +7,12 @@ library(forcats)
 library(latex2exp)
 source("./gamfunc.R")
 
+# Synergy formula selection: "cv" = block-fold CV error on test_GAM_train
+# (robust to over-flexible surfaces); "aic" = previous behaviour.
+SYN_SELECT     <- "cv"
+SYN_CV_METRIC  <- "cv_rmse"
+N_BOOT         <- 1000   # block-bootstrap replicates for holdout intervals
+
 # 1. Load metadata and past evaluation results
 meta <- read.csv("../data/raw/dataset_split_2226.csv") %>% 
   janitor::clean_names() %>%
@@ -19,6 +25,16 @@ cas_eval  <- readRDS("../data/processed/CascadeR-CNN_deteval_2226.rds")
 # 2. Build Synergistic Dataset & ensure log_ratio is defined for M16_PropDiff
 img_combined <- build_synergy_dataset(yolo_eval, cas_eval, meta) %>%
   mutate(log_ratio = log((pred_yolo + 1) / (pred_cascade + 1)))
+
+# Detection-structure features from YOLO's boxes (gamfunc.R section 9). YOLO is
+# used as the image descriptor because it is the stronger GB detector and the
+# CV-selected GB synergy model is YOLO-based.
+crowd_feats  <- image_detection_features(yolo_eval$det_eval)
+img_combined <- add_crowding_features(img_combined, crowd_feats)
+cat("Crowding features (holdout + GAM-train images):\n")
+print(img_combined %>% group_by(region) %>%
+        summarise(across(all_of(CROWD_VARS), list(med = ~ median(.x), p90 = ~ quantile(.x, 0.9)))),
+      width = Inf)
 
 # ======================================================================
 # 2. Define Systematic Synergistic Candidate Formulas
@@ -66,7 +82,24 @@ image_candidate_forms <- list(
     ti(log_yolo_pred, log_ratio, k = c(6, 6)) + 
     ti(log_cascade_pred, log_ratio, k = c(6, 6)),
   
-  M17_Tensor3D    = n_annotations ~ te(log_yolo_pred, log_cascade_pred, log_pred_diff, k = c(5, 5, 5))
+  M17_Tensor3D    = n_annotations ~ te(log_yolo_pred, log_cascade_pred, log_pred_diff, k = c(5, 5, 5)),
+  
+  # STAGE 6: Detection-structure ("crowding") terms, added to the two CV
+  # winners (M04 GB, M12 MAB). k kept small: few holdout images exceed 100
+  # scallops, nearly all from cruise 202404.
+  C01_Overlap     = n_annotations ~ s(log_yolo_pred) + s(overlap_frac, k = 5),
+  C02_Spacing     = n_annotations ~ s(log_yolo_pred) + s(nn_ratio, k = 5),
+  C03_LowConf     = n_annotations ~ s(log_yolo_pred) + s(lowconf_frac, k = 5),
+  C04_BoxSize     = n_annotations ~ s(log_yolo_pred) + s(med_box_mm, k = 5),
+  C05_teOverlap   = n_annotations ~ te(log_yolo_pred, overlap_frac, k = c(5, 4)),
+  C06_teBoxSize   = n_annotations ~ te(log_yolo_pred, med_box_mm, k = c(5, 4)),
+  C07_teLowConf   = n_annotations ~ te(log_yolo_pred, lowconf_frac, k = c(5, 4)),
+  C08_Structure   = n_annotations ~ s(log_yolo_pred) + s(med_box_mm, k = 5) + s(lowconf_frac, k = 5) +
+                      s(overlap_frac, k = 5) + s(nn_ratio, k = 5),
+  C09_TensorBox   = n_annotations ~ te(log_yolo_pred, log_cascade_pred) + s(med_box_mm, k = 5) +
+                      s(lowconf_frac, k = 5),
+  C10_TensorCrowd = n_annotations ~ te(log_yolo_pred, log_cascade_pred) + s(overlap_frac, k = 5) +
+                      s(nn_ratio, k = 5)
 )
 
 # ======================================================================
@@ -93,12 +126,28 @@ selection_gb <- compare_image_gams(img_combined, image_candidate_forms, "GB")
 print(selection_gb, n = Inf)
 
 best_syn_gb <- select_best_synergy_model(selection_gb, image_candidate_forms, metric = "AIC")
+if (SYN_SELECT == "cv") {
+  cat("--- CV synergy selection: Georges Bank ---\n")
+  cv_gb <- cv_select_synergy(img_combined, image_candidate_forms, "GB", metric = SYN_CV_METRIC)
+  print(cv_gb, n = Inf)
+  cat("  [Selected by CV]", cv_gb$Model_ID[1], "\n")
+  best_syn_gb <- image_candidate_forms[[cv_gb$Model_ID[1]]]
+}
 
 cat("\n--- Synergy Selection: Mid-Atlantic Bight ---\n")
 selection_mab <- compare_image_gams(img_combined, image_candidate_forms, "MAB")
 print(selection_mab, n = Inf)
 
 best_syn_mab <- select_best_synergy_model(selection_mab, image_candidate_forms, metric = "AIC")
+if (SYN_SELECT == "cv") {
+  cat("--- CV synergy selection: Mid-Atlantic Bight ---\n")
+  cv_mab <- cv_select_synergy(img_combined, image_candidate_forms, "MAB", metric = SYN_CV_METRIC)
+  print(cv_mab, n = Inf)
+  cat("  [Selected by CV]", cv_mab$Model_ID[1], "\n")
+  best_syn_mab <- image_candidate_forms[[cv_mab$Model_ID[1]]]
+  write.csv(bind_rows(cv_gb %>% mutate(region = "GB"), cv_mab %>% mutate(region = "MAB")),
+            "../data/processed/synergy_cv_selection_2226.csv", row.names = FALSE)
+}
 
 # best_syn_gb <- image_candidate_forms$M17_Tensor3D
 # best_syn_mab <- image_candidate_forms$M07_YoloDiff
@@ -126,6 +175,74 @@ leakage_synergy <- bind_rows(
 cat("\n--- Synergy GAM holdout metrics: cross-fit vs in-sample stage-1 inputs ---\n")
 print(leakage_synergy)
 write.csv(leakage_synergy, "../data/processed/synergy_leakage_check_2226.csv", row.names = FALSE)
+
+# ----------------------------------------------------------------------
+# Crowding-term report (for the paper; NOT used for selection, which used CV
+# on test_GAM_train only). Best CV formula with vs without detection-structure
+# terms, both scored on the holdout overall and on dense images.
+# ----------------------------------------------------------------------
+DENSE_MIN <- 50   # annotations per image counted as "dense" in this report
+if (SYN_SELECT == "cv") {
+  best_id <- function(cv, crowd) {
+    ids <- cv$Model_ID[!is.na(cv$cv_rmse)]           # cv tables are sorted by CV error
+    ids <- if (crowd) ids[grepl("^C[0-9]", ids)] else ids[!grepl("^C[0-9]", ids)]
+    ids[1]
+  }
+  crowd_report <- purrr::map_dfr(c(FALSE, TRUE), function(cr) {
+    id_gb <- best_id(cv_gb, cr); id_mab <- best_id(cv_mab, cr)
+    ev <- test_synergy_gams(fit_synergy_gams(img_combined, image_candidate_forms[[id_gb]],
+                                             image_candidate_forms[[id_mab]]), img_combined)$img_eval
+    ev %>%
+      mutate(err = pred_synergy - n_annotations, dense = n_annotations >= DENSE_MIN) %>%
+      group_by(region) %>%
+      summarise(variant = if (cr) "best with crowding terms" else "best without crowding terms",
+                formula = if (first(region) == "GB") id_gb else id_mab,
+                cv_rmse = if (first(region) == "GB") cv_gb$cv_rmse[cv_gb$Model_ID == id_gb] else cv_mab$cv_rmse[cv_mab$Model_ID == id_mab],
+                holdout_rmse = sqrt(mean(err^2)),
+                holdout_pct_bias = 100 * sum(err) / sum(n_annotations),
+                dense_n = sum(dense),
+                dense_rmse = sqrt(mean(err[dense]^2)),
+                dense_pct_bias = 100 * sum(err[dense]) / sum(n_annotations[dense]),
+                .groups = "drop")
+  }) %>% arrange(region, variant)
+  cat("\n--- Synergy with vs without crowding terms (holdout; dense = >=", DENSE_MIN, "annotations) ---\n")
+  print(crowd_report, width = Inf)
+  write.csv(crowd_report, "../data/processed/synergy_crowding_report_2226.csv", row.names = FALSE)
+}
+
+# Where does any difference come from? RMSE by density bin (holdout only).
+leakage_by_bin <- bind_rows(
+  syn_eval$img_eval        %>% mutate(stage1_inputs = "out-of-fold (cross-fit)"),
+  syn_eval_insamp$img_eval %>% mutate(stage1_inputs = "in-sample (previous)")
+) %>%
+  group_by(region, density_bin, stage1_inputs) %>%
+  summarise(rmse = sqrt(mean((n_annotations - pred_synergy)^2, na.rm = TRUE)),
+            mean_bias = mean(pred_synergy - n_annotations, na.rm = TRUE),
+            n_images = n(), .groups = "drop") %>%
+  arrange(region, density_bin, stage1_inputs)
+print(leakage_by_bin, n = Inf)
+write.csv(leakage_by_bin, "../data/processed/synergy_leakage_by_bin_2226.csv", row.names = FALSE)
+
+# ----------------------------------------------------------------------
+# Block-bootstrap 95% intervals on holdout metrics for every method
+# (resampling whole transect blocks). d_rmse_* = RMSE minus synergy RMSE;
+# an interval excluding 0 means the difference is distinguishable.
+# ----------------------------------------------------------------------
+boot_df <- syn_eval$img_eval %>%
+  left_join(yolo_eval$img_eval %>% select(image_id, yolo_f1 = predicted_f1_number), by = "image_id") %>%
+  left_join(cas_eval$img_eval  %>% select(image_id, cascade_f1 = predicted_f1_number), by = "image_id")
+boot_metrics <- block_bootstrap_metrics(
+  boot_df,
+  pred_cols = c("Synergistic GAM" = "pred_synergy",
+                "YOLOv12 det-GAM" = "pred_yolo", "Cascade det-GAM" = "pred_cascade",
+                "YOLOv12 F1" = "yolo_f1", "Cascade F1" = "cascade_f1"),
+  ref = "Synergistic GAM", B = N_BOOT
+)
+print(boot_metrics, n = Inf, width = Inf)
+write.csv(boot_metrics, "../data/processed/holdout_bootstrap_metrics_2226.csv", row.names = FALSE)
+
+# Holdout table with every method's prediction, for error.R
+saveRDS(boot_df, "../data/processed/synergy_holdout_eval_2226.rds")
 # ======================================================================
 # 4. The 12-Panel Plot Generation
 # ======================================================================
@@ -136,9 +253,9 @@ make_1to1_plot <- function(data, x_col, region_name, plot_title, r2, rmse, pt_co
   
   val_r2 <- round(r2, 3)
   val_rmse <- round(rmse, 3)
-  label_text <- sprintf("R² = %.3f\nRMSE = %.3f", val_r2, val_rmse)
+  label_text <- sprintf("R²(1:1) = %.3f\nRMSE = %.3f", val_r2, val_rmse)
   
-  p <- ggplot(data %>% filter(region == region_name), aes_string(x = x_col, y = "n_annotations")) +
+  p <- ggplot(data %>% filter(region == region_name), aes(x = .data[[x_col]], y = n_annotations)) +
     geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey40") +
     geom_point(color = pt_color, size = 1.2, alpha = 0.5) +
     geom_text(
@@ -186,22 +303,22 @@ n_mab_abundance <- sum((y_test %>% filter(region == "MAB"))$n_annotations)
 p <- list()
 
 # -- Row 1: YOLOv12 (Red Points) --
-p[[1]] <- make_1to1_plot(y_test, "predicted_number", "GB", "YOLOv12 \u03A3 P(detection)", ym$r2_calibrated[ym$region=="GB"], ym$rmse_calibrated[ym$region=="GB"], "red", show_x = FALSE, show_y = TRUE)
-p[[2]] <- make_1to1_plot(y_test, "predicted_f1_number", "GB", expression("YOLOv12 F"[1] ~ "Threshold"), ym$r2_f1[ym$region=="GB"], ym$rmse_f1[ym$region=="GB"], "red", show_x = FALSE, show_y = FALSE)
-p[[3]] <- make_1to1_plot(y_test, "predicted_number", "MAB", "YOLOv12 \u03A3 P(detection)", ym$r2_calibrated[ym$region=="MAB"], ym$rmse_calibrated[ym$region=="MAB"], "red", show_x = FALSE, show_y = FALSE)
-p[[4]] <- make_1to1_plot(y_test, "predicted_f1_number", "MAB", expression("YOLOv12 F"[1] ~ "Threshold"), ym$r2_f1[ym$region=="MAB"], ym$rmse_f1[ym$region=="MAB"], "red", show_x = FALSE, show_y = FALSE)
+p[[1]] <- make_1to1_plot(y_test, "predicted_number", "GB", expression("YOLOv12" ~ Sigma ~ "P(detection)"), ym$r2_1to1_calibrated[ym$region=="GB"], ym$rmse_calibrated[ym$region=="GB"], "red", show_x = FALSE, show_y = TRUE)
+p[[2]] <- make_1to1_plot(y_test, "predicted_f1_number", "GB", expression("YOLOv12 F"[1] ~ "Threshold"), ym$r2_1to1_f1[ym$region=="GB"], ym$rmse_f1[ym$region=="GB"], "red", show_x = FALSE, show_y = FALSE)
+p[[3]] <- make_1to1_plot(y_test, "predicted_number", "MAB", expression("YOLOv12" ~ Sigma ~ "P(detection)"), ym$r2_1to1_calibrated[ym$region=="MAB"], ym$rmse_calibrated[ym$region=="MAB"], "red", show_x = FALSE, show_y = FALSE)
+p[[4]] <- make_1to1_plot(y_test, "predicted_f1_number", "MAB", expression("YOLOv12 F"[1] ~ "Threshold"), ym$r2_1to1_f1[ym$region=="MAB"], ym$rmse_f1[ym$region=="MAB"], "red", show_x = FALSE, show_y = FALSE)
 
 # -- Row 2: Cascade R-CNN (Blue Points) --
-p[[5]] <- make_1to1_plot(c_test, "predicted_number", "GB", "Cascade R-CNN \u03A3 P(detection)", cm$r2_calibrated[cm$region=="GB"], cm$rmse_calibrated[cm$region=="GB"], "#2C7FB8", show_x = FALSE, show_y = TRUE)
-p[[6]] <- make_1to1_plot(c_test, "predicted_f1_number", "GB", expression("Cascade R-CNN F"[1] ~ "Threshold"), cm$r2_f1[cm$region=="GB"], cm$rmse_f1[cm$region=="GB"], "#2C7FB8", show_x = FALSE, show_y = FALSE)
-p[[7]] <- make_1to1_plot(c_test, "predicted_number", "MAB", "Cascade R-CNN \u03A3 P(detection)", cm$r2_calibrated[cm$region=="MAB"], cm$rmse_calibrated[cm$region=="MAB"], "#2C7FB8", show_x = FALSE, show_y = FALSE)
-p[[8]] <- make_1to1_plot(c_test, "predicted_f1_number", "MAB", expression("Cascade R-CNN F"[1] ~ "Threshold"), cm$r2_f1[cm$region=="MAB"], cm$rmse_f1[cm$region=="MAB"], "#2C7FB8", show_x = FALSE, show_y = FALSE)
+p[[5]] <- make_1to1_plot(c_test, "predicted_number", "GB", expression("Cascade R-CNN" ~ Sigma ~ "P(detection)"), cm$r2_1to1_calibrated[cm$region=="GB"], cm$rmse_calibrated[cm$region=="GB"], "#2C7FB8", show_x = FALSE, show_y = TRUE)
+p[[6]] <- make_1to1_plot(c_test, "predicted_f1_number", "GB", expression("Cascade R-CNN F"[1] ~ "Threshold"), cm$r2_1to1_f1[cm$region=="GB"], cm$rmse_f1[cm$region=="GB"], "#2C7FB8", show_x = FALSE, show_y = FALSE)
+p[[7]] <- make_1to1_plot(c_test, "predicted_number", "MAB", expression("Cascade R-CNN" ~ Sigma ~ "P(detection)"), cm$r2_1to1_calibrated[cm$region=="MAB"], cm$rmse_calibrated[cm$region=="MAB"], "#2C7FB8", show_x = FALSE, show_y = FALSE)
+p[[8]] <- make_1to1_plot(c_test, "predicted_f1_number", "MAB", expression("Cascade R-CNN F"[1] ~ "Threshold"), cm$r2_1to1_f1[cm$region=="MAB"], cm$rmse_f1[cm$region=="MAB"], "#2C7FB8", show_x = FALSE, show_y = FALSE)
 
 # -- Row 3: Synergy Image-GAM (Purple Points, Full and Zoomed) --
-p[[9]]  <- make_1to1_plot(s_test, "pred_synergy", "GB", "Synergistic GAM", sm$r2_synergy[sm$region=="GB"], sm$rmse_synergy[sm$region=="GB"], "#7570B3", show_x = TRUE, show_y = TRUE)
-p[[10]] <- make_1to1_plot(s_test, "pred_synergy", "GB", "Synergistic GAM (95% Data)", sm$r2_synergy[sm$region=="GB"], sm$rmse_synergy[sm$region=="GB"], "#7570B3", show_x = TRUE, show_y = FALSE, zoom_limit = limit_gb)
-p[[11]] <- make_1to1_plot(s_test, "pred_synergy", "MAB", "Synergistic GAM", sm$r2_synergy[sm$region=="MAB"], sm$rmse_synergy[sm$region=="MAB"], "#7570B3", show_x = TRUE, show_y = FALSE)
-p[[12]] <- make_1to1_plot(s_test, "pred_synergy", "MAB", "Synergistic GAM (95% Data)", sm$r2_synergy[sm$region=="MAB"], sm$rmse_synergy[sm$region=="MAB"], "#7570B3", show_x = TRUE, show_y = FALSE, zoom_limit = limit_mab)
+p[[9]]  <- make_1to1_plot(s_test, "pred_synergy", "GB", "Synergistic GAM", sm$r2_1to1_synergy[sm$region=="GB"], sm$rmse_synergy[sm$region=="GB"], "#7570B3", show_x = TRUE, show_y = TRUE)
+p[[10]] <- make_1to1_plot(s_test, "pred_synergy", "GB", "Synergistic GAM (95% Data)", sm$r2_1to1_synergy[sm$region=="GB"], sm$rmse_synergy[sm$region=="GB"], "#7570B3", show_x = TRUE, show_y = FALSE, zoom_limit = limit_gb)
+p[[11]] <- make_1to1_plot(s_test, "pred_synergy", "MAB", "Synergistic GAM", sm$r2_1to1_synergy[sm$region=="MAB"], sm$rmse_synergy[sm$region=="MAB"], "#7570B3", show_x = TRUE, show_y = FALSE)
+p[[12]] <- make_1to1_plot(s_test, "pred_synergy", "MAB", "Synergistic GAM (95% Data)", sm$r2_1to1_synergy[sm$region=="MAB"], sm$rmse_synergy[sm$region=="MAB"], "#7570B3", show_x = TRUE, show_y = FALSE, zoom_limit = limit_mab)
 
 
 # ======================================================================

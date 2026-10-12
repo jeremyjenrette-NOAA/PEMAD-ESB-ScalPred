@@ -1,6 +1,7 @@
 library(dplyr)
 library(tidyr)
 library(mgcv)
+source("../s/cvfunc.R")   # predict_det_p(): handles random-effect detection GAMs
 
 # ======================================================================
 # 1. Predict Detection-Level Calibration
@@ -16,12 +17,10 @@ predict_calibration_gams <- function(det_df, gams) {
   for (reg in names(gams)) {
     reg_idx <- which(det_df$region == reg)
     if (length(reg_idx) > 0) {
-      det_df$pred_p[reg_idx] <- predict(
-        gams[[reg]], 
-        newdata = det_df[reg_idx, ], 
-        type = "response", 
-        na.action = na.pass
-      )
+      # Population-level p: image/block effects (always new here) are
+      # integrated out; cruise is conditioned on only if seen in fitting,
+      # otherwise integrated out too (e.g. a future survey).
+      det_df$pred_p[reg_idx] <- predict_det_p(gams[[reg]], det_df[reg_idx, ])
     }
   }
   
