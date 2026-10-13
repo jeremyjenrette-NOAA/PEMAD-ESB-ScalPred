@@ -90,6 +90,8 @@ FOV <- function(altitude, roll, pitch) {
   -area / 2
 } 
 
+ROLL_OFFSET_2026_DEG <- 46.12  # median 2026 roll over 5.69M images (SD 0.47 deg); see 2026-10-13 fix
+
 allimg_standardized <- allimg %>%
   # 1. Drop the therm column
   select(-therm) %>%
@@ -130,7 +132,8 @@ allimg_standardized <- allimg %>%
   # 4. Calculate field of view row-by-row (required because FOV uses matrix math)
   rowwise() %>%
   mutate(
-    field_of_view_sq_meter = FOV(altitude, vehicle_roll_angle, vehicle_pitch_angle)
+    # 2026 roll sensor reads ~46.12 deg in level flight (mounting/convention offset); remove before projecting
+    field_of_view_sq_meter = FOV(altitude, vehicle_roll_angle - ROLL_OFFSET_2026_DEG, vehicle_pitch_angle)
   ) %>%
   ungroup() # Important: remove rowwise grouping when done
 

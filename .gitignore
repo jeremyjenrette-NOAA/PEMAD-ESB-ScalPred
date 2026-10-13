@@ -1,0 +1,18 @@
+data/
+figures/
+
+s/logs/
+
+# OS / R session junk
+.DS_Store
+**/.DS_Store
+.Rhistory
+**/.Rhistory
+Rplots.pdf
+**/Rplots.pdf
+
+# YOLO deploy bundle: keep scripts, ignore weights, sample images and outputs
+pred/yolo_deploy/**/model/
+pred/yolo_deploy/**/images/
+pred/yolo_deploy/**/runs/
+pred/yolo_deploy/**/output/
