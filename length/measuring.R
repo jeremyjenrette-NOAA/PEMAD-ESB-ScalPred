@@ -9,6 +9,10 @@ library(tidyr)
 
 source("lengthfunc2.R")
 
+# Maximum plausible shell height (mm). Manual measurements above this are treated as
+# measurement errors and excluded from size validation only (they remain in abundance counts).
+MAX_SH_MM <- 180
+
 # 1. Load Data -----------------------------------------------------------------
 gt_2226   <- read.csv("../data/raw/groundtruth2226.csv", stringsAsFactors = FALSE)
 dat_split <- read.csv("../data/raw/dataset_split_2226.csv", stringsAsFactors = FALSE)
@@ -34,7 +38,8 @@ gt_clean <- gt_2226 %>%
   mutate(
     region = if_else(longitude >= -71, "GB", "MAB") %>% factor(levels = c("MAB", "GB"))
   ) %>%
-  filter(!is.na(true_length_mm))
+  filter(!is.na(true_length_mm)) %>%
+  filter(true_length_mm <= MAX_SH_MM)  # 180 mm cap (size validation only)
 
 # 3. Process Detections and Compute Error Statistics per Subclass -------------
 calc_method <- "average"

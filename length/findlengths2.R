@@ -10,6 +10,10 @@ library(foreach)
 library(doParallel)
 source("lengthfunc2.R")
 
+# Maximum plausible shell height (mm). Manual measurements above this are treated as
+# measurement errors and excluded from size validation only (they remain in abundance counts).
+MAX_SH_MM <- 180
+
 # ------------------------------------------------------------------------------
 # 1. Setup & Helper Functions
 # ------------------------------------------------------------------------------
@@ -37,7 +41,8 @@ gt_clean <- gt_2226 %>%
   mutate(
     region = if_else(longitude >= -71, "GB", "MAB") %>% factor(levels = c("MAB", "GB"))
   ) %>%
-  filter(!is.na(true_length_mm))
+  filter(!is.na(true_length_mm)) %>%
+  filter(true_length_mm <= MAX_SH_MM)  # 180 mm cap (size validation only)
 
 # Re-encapsulating your binning function to be self-contained for parallel workers
 # Uniformly bin distribution frequencies
