@@ -2,8 +2,8 @@
 # error.R - Residual / error diagnostics on the HOLDOUT set (test_GAM_test)
 #
 # Standalone: reads the table saved by gammod.R
-#   ../data/processed/synergy_holdout_eval_2226.rds
-# Run order: makedat.R -> gamstrat.R -> gammod.R -> error.R
+#   ../data/processed/holdout_eval_2226_v2.rds  (n3/n3_export_holdout.R)
+# Run order: makedat.R -> gamstrat.R -> gammod.R -> n3/n3_ablation.R -> n3/n3_export_holdout.R -> error.R
 #
 # What it reports (all holdout only):
 #   1. Annotation audit: images where BOTH detectors find many scallops but the
@@ -31,18 +31,22 @@ source("./gamfunc.R")   # r2_1to1(), block_bootstrap_metrics()
 # ----------------------------------------------------------------------
 # 0. Configuration
 # ----------------------------------------------------------------------
-METHODS <- c("Synergistic GAM" = "pred_synergy",
-             "YOLOv12 det-GAM" = "pred_yolo", "Cascade det-GAM" = "pred_cascade",
-             "YOLOv12 F1"      = "yolo_f1",   "Cascade F1"      = "cascade_f1")
-METHOD_COLORS <- c("Synergistic GAM" = "#7570B3",
-                   "YOLOv12 det-GAM" = "#CB181D", "Cascade det-GAM" = "#2171B5",
-                   "YOLOv12 F1"      = "#FB6A4A", "Cascade F1"      = "#6BAED6")
-PLOT_METHODS <- c("Synergistic GAM", "YOLOv12 F1", "Cascade F1")   # covariate/spatial panels
+METHODS <- c("Two-stage YOLOv12"           = "pred_2s_yolo",
+             "Two-stage YOLOv12 + Cascade" = "pred_2s_yc",
+             "YOLOv12 stage 1"  = "pred_yolo", "Cascade stage 1" = "pred_cascade",
+             "YOLOv12 F1"       = "yolo_f1",   "Cascade F1"      = "cascade_f1")
+REF_METHOD <- "Two-stage YOLOv12"
+METHOD_COLORS <- c("Two-stage YOLOv12" = "#7570B3", "Two-stage YOLOv12 + Cascade" = "#3F007D",
+                   "YOLOv12 stage 1"   = "#CB181D", "Cascade stage 1" = "#2171B5",
+                   "YOLOv12 F1"        = "#FB6A4A", "Cascade F1"      = "#6BAED6")
+PLOT_METHODS <- c("Two-stage YOLOv12", "YOLOv12 F1", "Cascade F1")   # covariate/spatial panels
 
 COVARIATES <- c("altitude" = "Altitude (m)", "bottom_depth" = "Bottom depth (m)",
                 "ctd_temperature_celsius" = "Temperature (°C)",
                 "field_of_view_sq_meter" = "Field of view (m²)",
                 "fluorometer_backscatter_ntu" = "Backscatter (NTU)")
+# Crowding panel for Fig. 5 (YOLO boxes; images with >= 2 detections, where spacing is defined)
+CROWD_PANEL <- c("nn_ratio" = "Nearest-neighbour spacing / box size")
 # Detection-structure features (computed in gammod.R from YOLO boxes)
 STRUCTURE <- c("med_box_mm" = "Median box size (mm)", "lowconf_frac" = "Share below F1 threshold",
                "overlap_frac" = "Share of overlapping boxes", "nn_ratio" = "NN spacing / box size")
@@ -52,7 +56,7 @@ ERROR_SCALE <- "count"  # "count" (pred - true per image) or "density" (per m²)
 
 AUDIT_MAX_ANNOT <- 1    # annotation count at or below which an image can be flagged
 AUDIT_MIN_DET   <- 10   # ...if BOTH detectors' F1-threshold counts are at least this
-AUDIT_TOP_N     <- 30   # also list the N largest |synergy error| images
+AUDIT_TOP_N     <- 30   # also list the N largest |two-stage YOLOv12 error| images
 
 GRID_DEG   <- 0.1       # spatial grid cell (degrees)
 GRID_MIN_N <- 3         # minimum images per cell to map
@@ -67,7 +71,7 @@ PRES_DIR <- "~/saltnoaa/presentations/figures"
 # ----------------------------------------------------------------------
 # 1. Load and clean
 # ----------------------------------------------------------------------
-ev <- readRDS(file.path(OUT_DIR, "synergy_holdout_eval_2226.rds")) %>%
+ev <- readRDS(file.path(OUT_DIR, "holdout_eval_2226_v2.rds")) %>%
   filter(dataset == "test_GAM_test") %>%
   mutate(region = as.character(region),
          cruise = as.character(name_cruise_token),
@@ -83,13 +87,13 @@ cat("Holdout images:", nrow(ev), "\n")
 ev <- ev %>%
   mutate(min_det = pmin(yolo_f1, cascade_f1),
          suspect_missing_annotation = n_annotations <= AUDIT_MAX_ANNOT & min_det >= AUDIT_MIN_DET,
-         synergy_error = pred_synergy - n_annotations)
+         main_error = pred_2s_yolo - n_annotations)
 
 audit <- ev %>%
-  filter(suspect_missing_annotation | rank(-abs(synergy_error)) <= AUDIT_TOP_N) %>%
-  arrange(desc(abs(synergy_error))) %>%
+  filter(suspect_missing_annotation | rank(-abs(main_error)) <= AUDIT_TOP_N) %>%
+  arrange(desc(abs(main_error))) %>%
   select(image_id, region, cruise, transect_block_id, density_bin, n_annotations,
-         yolo_f1, cascade_f1, pred_synergy, synergy_error, suspect_missing_annotation,
+         yolo_f1, cascade_f1, pred_2s_yolo, main_error, suspect_missing_annotation,
          any_of(c("class_name", "is_empty")))
 cat("\n--- Annotation audit:", sum(ev$suspect_missing_annotation),
     "suspected missing-annotation image(s); top", AUDIT_TOP_N, "|errors| listed ---\n")
@@ -108,11 +112,11 @@ print(mse_share, n = Inf)
 # ----------------------------------------------------------------------
 # 3. Metrics: overall (with / without flagged images), by density bin, by cruise
 # ----------------------------------------------------------------------
-boot_all  <- block_bootstrap_metrics(ev, METHODS, ref = "Synergistic GAM", B = N_BOOT) %>%
+boot_all  <- block_bootstrap_metrics(ev, METHODS, ref = REF_METHOD, B = N_BOOT) %>%
   mutate(subset = "all holdout images")
 boot_excl <- if (any(ev$suspect_missing_annotation)) {
   block_bootstrap_metrics(ev %>% filter(!suspect_missing_annotation), METHODS,
-                          ref = "Synergistic GAM", B = N_BOOT) %>%
+                          ref = REF_METHOD, B = N_BOOT) %>%
     mutate(subset = "excluding suspected missing annotations (sensitivity)")
 } else NULL
 metrics_overall <- bind_rows(boot_all, boot_excl)
@@ -191,6 +195,15 @@ plot_covariate_error <- function(df, x_var, x_label) {
 }
 
 cov_plots <- lapply(names(COVARIATES), function(v) plot_covariate_error(err_long, v, COVARIATES[[v]]))
+cov_plots <- c(cov_plots, lapply(names(CROWD_PANEL), function(v)
+  plot_covariate_error(err_long %>% filter(n_det_all >= 2), v, CROWD_PANEL[[v]])))
+
+# Image-level error summary for Table S1
+image_error_summary <- err_long %>%
+  group_by(region, Method) %>%
+  summarise(SD = sd(error), MAE = mean(abs(error)), RMSE = sqrt(mean(error^2)),
+            Max_Error = error[which.max(abs(error))], .groups = "drop")
+write.csv(image_error_summary, file.path(OUT_DIR, "holdout_image_error_summary_2226.csv"), row.names = FALSE)
 
 # Detection-structure panels: images WITH detections only (images without
 # detections carry fill-in values that would pile up in one bin)
@@ -323,7 +336,7 @@ cov_assembly <- (wrap_plots(cov_plots, ncol = 2) / p_space) +
   theme(legend.position = "bottom")
 cov_assembly <- cov_assembly +
   plot_annotation(
-    title = "Holdout error vs. environmental covariates and space",
+    title = "Holdout error vs. environmental covariates, crowding and space",
     subtitle = sprintf("Quantile-bin means ± 95%% CI (block-clustered SE); error scale: %s",
                        ERROR_SCALE),
     theme = theme(plot.title = element_text(size = 15, face = "bold", hjust = 0.5),

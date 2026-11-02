@@ -35,6 +35,7 @@ size_bin <- function(x) cut(x, BIN_EDGES, include.lowest = TRUE, right = FALSE,
                            labels = c("0-40", "40-80", "80-120", "120-180"))
 size_cls <- function(x) factor(if_else(x < SIZE_CUT, "< 40 mm", ">= 40 mm"), levels = c("< 40 mm", ">= 40 mm"))
 se <- function(x) sd(x) / sqrt(length(x))
+pr <- function(x) print(tibble::as_tibble(x), n = Inf, width = Inf)   # print() n= works on tibbles only
 
 # ------------------------------------------------------------------------------
 # Data
@@ -90,8 +91,8 @@ n1_bins <- pairs %>% group_by(model, region, bin) %>%
   summarise(n = n(), bias = mean(err), bias_se = se(err), mae = mean(abs(err)), mae_se = se(abs(err)),
             .groups = "drop")
 write.csv(n1_bins, file.path(OUT_DIR, "N1_error_by_size_bin.csv"), row.names = FALSE)
-cat("\nN1 agreement (matched pairs):\n"); print(n1 %>% mutate(across(where(is.numeric), ~ round(.x, 3))), width = Inf)
-cat("\nN1 error by size bin:\n"); print(n1_bins %>% mutate(across(where(is.numeric), ~ round(.x, 2))), n = Inf)
+cat("\nN1 agreement (matched pairs):\n"); pr(n1 %>% mutate(across(where(is.numeric), ~ round(.x, 3))))
+cat("\nN1 error by size bin:\n"); pr(n1_bins %>% mutate(across(where(is.numeric), ~ round(.x, 2))))
 
 lab <- n1_region %>% mutate(txt = sprintf("n = %s\nslope %.2f, R² %.2f\nbias %.1f mm, MAE %.1f mm",
                                          format(n, big.mark = ","), slope, r2, bias, mae))
@@ -114,7 +115,7 @@ p_ba <- ggplot(pairs, aes(mean_mm, err)) +
   geom_hline(data = n1_region, aes(yintercept = loa_lo), colour = "#eb6834", linetype = 2) +
   geom_hline(data = n1_region, aes(yintercept = loa_hi), colour = "#eb6834", linetype = 2) +
   facet_grid(region ~ model) + coord_cartesian(xlim = c(0, 180), ylim = c(-40, 40)) +
-  labs(x = "Mean of predicted and manual shell height (mm)", y = "Predicted − manual (mm)") +
+  labs(x = "Mean of predicted and manual shell height (mm)", y = "Predicted - manual (mm)") +
   theme_bw(base_size = 9) + theme(panel.grid.minor = element_blank())
 ggsave(file.path(FIG_DIR, "2226_size_bland_altman.pdf"), p_ba, width = 7.5, height = 4.6)
 ggsave(file.path(FIG_DIR, "2226_size_bland_altman.png"), p_ba, width = 7.5, height = 4.6, dpi = 300, bg = "white")
@@ -142,15 +143,15 @@ n2_cls   <- count_table(size_cls) %>% rename(size_class = k)
 write.csv(n14_bins, file.path(OUT_DIR, "N14_counts_by_size_bin.csv"), row.names = FALSE)
 write.csv(n2_cls,   file.path(OUT_DIR, "N2_counts_by_40mm_class.csv"), row.names = FALSE)
 cat("\nN14 counts by size bin (all Holdout detections):\n")
-print(n14_bins %>% mutate(count = round(count), pct_diff = round(pct_diff, 1)), n = Inf)
+pr(n14_bins %>% mutate(count = round(count), pct_diff = round(pct_diff, 1)))
 cat("\nN2 counts by 40 mm class:\n")
-print(n2_cls %>% mutate(count = round(count), pct_diff = round(pct_diff, 1)), n = Inf)
+pr(n2_cls %>% mutate(count = round(count), pct_diff = round(pct_diff, 1)))
 
 # 2 x 2 confusion across the 40 mm cutoff (matched pairs)
 conf40 <- pairs %>% count(model, region, cls_true, cls_pred) %>%
   group_by(model, region, cls_true) %>% mutate(pct_of_true = 100 * n / sum(n)) %>% ungroup()
 write.csv(conf40, file.path(OUT_DIR, "N14_confusion_40mm.csv"), row.names = FALSE)
-cat("\n40 mm confusion (matched pairs; rows = manual class):\n"); print(conf40 %>% mutate(pct_of_true = round(pct_of_true, 1)), n = Inf)
+cat("\n40 mm confusion (matched pairs; rows = manual class):\n"); pr(conf40 %>% mutate(pct_of_true = round(pct_of_true, 1)))
 
 # N2: matched-pair accuracy and size-frequency overlap within each 40 mm class
 ovl <- function(a, b, wa = NULL, wb = NULL) {
@@ -172,7 +173,7 @@ n2_err <- pairs %>% filter(model != "RT-DETR-L") %>% group_by(model, region, siz
   summarise(n_pairs = n(), bias = mean(err), mae = mean(abs(err)), .groups = "drop")
 n2 <- n2_ovl %>% left_join(n2_err, by = c("model", "region", "size_class"))
 write.csv(n2, file.path(OUT_DIR, "N2_size_class_metrics.csv"), row.names = FALSE)
-cat("\nN2 size-class metrics:\n"); print(n2 %>% mutate(across(where(is.numeric), ~ round(.x, 3))), n = Inf, width = Inf)
+cat("\nN2 size-class metrics:\n"); pr(n2 %>% mutate(across(where(is.numeric), ~ round(.x, 3))))
 
 # ------------------------------------------------------------------------------
 # Replacement for the size-frequency figure: region x model, 5 mm bins,

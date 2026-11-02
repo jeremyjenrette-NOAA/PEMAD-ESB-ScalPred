@@ -77,23 +77,25 @@ save(fig, "tierb2026_effort")
 # ---------------------------------------------------------------- Fig. S6: Tier A
 m = pd.read_csv("../data/processed/tiera/tiera_holdout_metrics.csv")
 b = pd.read_csv("../data/processed/tiera/tiera_holdout_bootstrap.csv").dropna(subset=["region"])
-meths = [("Two-stage, selected", "Two-stage calibration", BLUE, "o"),
+PURPLE = "#6250d6"
+meths = [("Two-stage, one detector", "Two-stage, YOLOv12", BLUE, "o"),
+         ("Two-stage, two detectors", "Two-stage, YOLOv12 + Cascade R-CNN", PURPLE, "D"),
          ("YOLOv12 F1", "YOLOv12 F$_1$-threshold count", AQUA, "^"),
          ("Cascade F1", "Cascade R-CNN F$_1$-threshold count", ORANGE, "s")]
-fig, axes = plt.subplots(1, 2, figsize=(7.0, 3.3), gridspec_kw={"width_ratios": [4, 3]})
+fig, axes = plt.subplots(1, 2, figsize=(7.4, 3.5), gridspec_kw={"width_ratios": [4, 3]})
 for ax, reg in zip(axes, ["GB", "MAB"]):
     style(ax); ax.axhline(0, color=INK2, lw=0.8, ls="--")
     yrs = sorted(m[(m.region == reg)].held_year.unique())
     for k, (meth, lab, col, mk) in enumerate(meths):
         for t, yr in enumerate(yrs):
-            x = t + (k - 1) * 0.22
+            x = t + (k - 1.5) * 0.19
             lo = m[(m.fit_type == "Leave-year-out") & (m.region == reg) & (m.held_year == yr) & (m.method == meth)]
             po = m[(m.fit_type == "Pooled (all years)") & (m.region == reg) & (m.held_year == yr) & (m.method == meth)]
             ci = b[(b.region == reg) & (b.held_year == yr) & (b.method == meth)]
             if len(ci): ax.vlines(x, ci.bias_lo.iloc[0], ci.bias_hi.iloc[0], color=col, lw=1.2)
             ax.plot(x, lo.pct_bias_total.iloc[0], marker=mk, color=col, ms=5.5, mec=col,
                     ls="none", label=lab if t == 0 else None)
-            ax.plot(x + 0.09, po.pct_bias_total.iloc[0], marker=mk, mfc="white", mec=col, mew=1.1, ms=4.5,
+            ax.plot(x + 0.07, po.pct_bias_total.iloc[0], marker=mk, mfc="white", mec=col, mew=1.1, ms=4.5,
                     ls="none", label=None)
     ntrue = m[(m.region == reg) & (m.fit_type == "Leave-year-out") & (m.method == "YOLOv12 F1")].set_index("held_year").total_true
     ax.set_xticks(range(len(yrs)))
