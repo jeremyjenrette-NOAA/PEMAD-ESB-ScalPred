@@ -176,19 +176,39 @@ bin_covariate <- function(df, x_var, n_bins = N_BINS) {
               se_err = cl_se(error, transect_block_id), n = n(), .groups = "drop")
 }
 
+# Plotting bins: fewer, and built from unique quantile breaks so that tied values
+# (many zeros, or the spacing cap of 5) form one bin instead of stacked duplicates.
+# Table S2 keeps the 10 equal-count bins of bin_covariate().
+N_PLOT_BINS <- 7
+bin_for_plot <- function(df, x_var, n_bins = N_PLOT_BINS) {
+  df %>% filter(!is.na(.data[[x_var]])) %>%
+    group_by(region) %>%
+    mutate(x_bin = {
+      x <- .data[[x_var]]
+      br <- unique(quantile(x, seq(0, 1, length.out = n_bins + 1), na.rm = TRUE, type = 1))
+      if (length(br) < 2) 1L else as.integer(cut(x, br, include.lowest = TRUE))
+    }) %>%
+    group_by(region, Method, x_bin) %>%
+    summarise(x_mid = median(.data[[x_var]]), mean_err = mean(error),
+              se_err = cl_se(error, transect_block_id), n = n(), .groups = "drop") %>%
+    filter(n >= 10)
+}
+
 plot_covariate_error <- function(df, x_var, x_label) {
   d  <- df %>% filter(Method %in% PLOT_METHODS)
-  bd <- bin_covariate(d, x_var)
-  lim <- range(c(bd$mean_err - 2 * bd$se_err, bd$mean_err + 2 * bd$se_err), 0, na.rm = TRUE)
-  ggplot(bd, aes(x = x_mid, y = mean_err, colour = Method)) +
+  bd <- bin_for_plot(d, x_var)
+  # dodge proportional to the typical gap between bin centres, per region
+  gap <- bd %>% distinct(region, x_bin, x_mid) %>% group_by(region) %>% arrange(x_mid, .by_group = TRUE) %>%
+    summarise(g = median(diff(x_mid)), .groups = "drop")
+  bd <- bd %>% left_join(gap, by = "region") %>%
+    mutate(g = ifelse(is.finite(g) & g > 0, g, 1),
+           x_plot = x_mid + (as.integer(factor(Method, levels = PLOT_METHODS)) - 2) * 0.22 * g)
+  ggplot(bd, aes(x = x_plot, y = mean_err, colour = Method)) +
     geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
-    geom_line(alpha = 0.6) +
-    geom_pointrange(aes(ymin = mean_err - 1.96 * se_err, ymax = mean_err + 1.96 * se_err),
-                    position = position_dodge(width = diff(range(bd$x_mid)) / (N_BINS * 3)),
-                    size = 0.3, shape = 21, fill = "white") +
+    geom_linerange(aes(ymin = mean_err - 1.96 * se_err, ymax = mean_err + 1.96 * se_err), linewidth = 0.4) +
+    geom_point(size = 1.4) +
     facet_wrap(~ region, scales = "free") +
     scale_colour_manual(values = METHOD_COLORS) +
-    coord_cartesian(ylim = lim) +
     theme_bw(base_size = 11) +
     labs(x = x_label, y = y_lab, colour = NULL) +
     theme(legend.position = "bottom", panel.grid.minor = element_blank())
@@ -240,17 +260,17 @@ write.csv(calib_slope, file.path(OUT_DIR, "holdout_calibration_slope_2226.csv"),
 p_calib <- ggplot(calib %>% filter(Method %in% PLOT_METHODS),
                   aes(pred_mean, true_mean, colour = Method)) +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "grey50") +
-  geom_line(alpha = 0.6) +
-  geom_pointrange(aes(ymin = pmax(true_mean - 1.96 * true_se, 0), ymax = true_mean + 1.96 * true_se),
-                  size = 0.3, shape = 21, fill = "white") +
+  geom_line(alpha = 0.5, show.legend = FALSE) +
+  geom_linerange(aes(ymin = pmax(true_mean - 1.96 * true_se, 0), ymax = true_mean + 1.96 * true_se),
+                 linewidth = 0.4, show.legend = FALSE) +
+  geom_point(size = 1.4, show.legend = FALSE) +
   scale_x_continuous(trans = "log1p", breaks = c(0, 1, 2, 5, 10, 25, 50, 100, 200)) +
   scale_y_continuous(trans = "log1p", breaks = c(0, 1, 2, 5, 10, 25, 50, 100, 200)) +
   facet_wrap(~ region, scales = "free") +
   scale_colour_manual(values = METHOD_COLORS) +
   theme_bw(base_size = 11) +
   labs(x = "Mean predicted count (bin)", y = "Mean annotated count",
-       title = "Calibration by predicted count", colour = NULL,
-       subtitle = sprintf("%d quantile bins of the prediction; ± 95%% CI (block-clustered); log1p axes", N_CAL_BINS)) +
+       colour = NULL) +
   theme(legend.position = "bottom", panel.grid.minor = element_blank())
 
 # ----------------------------------------------------------------------
@@ -352,10 +372,14 @@ if (dir.exists(path.expand(PRES_DIR))) {
 struct_assembly <- (wrap_plots(struct_plots, ncol = 2) / p_calib) +
   plot_layout(heights = c(2, 1.2), guides = "collect") &
   theme(legend.position = "bottom")
-struct_assembly <- struct_assembly +
-  plot_annotation(title = "Holdout error vs. detection structure, and calibration",
-                  theme = theme(plot.title = element_text(size = 15, face = "bold", hjust = 0.5)))
-ggsave(file.path(FIG_DIR, "2226_structure_error_calibration.pdf"), struct_assembly, width = 11, height = 12,
+struct_assembly <- struct_assembly + plot_annotation(tag_levels = "A")
+ggsave(file.path(FIG_DIR, "2226_structure_error_calibration.pdf"), struct_assembly, width = 10, height = 11,
        device = if (capabilities("cairo")) cairo_pdf else "pdf")
+ggsave(file.path(FIG_DIR, "2226_structure_error_calibration.png"), struct_assembly, width = 10, height = 11,
+       dpi = 300, bg = "white")
+ovl_fig <- path.expand("~/Library/CloudStorage/Dropbox/Apps/Overleaf/NEFSC-scallop-detection/ms_figures")
+if (dir.exists(ovl_fig)) file.copy(file.path(FIG_DIR, c("2226_structure_error_calibration.pdf",
+                                                        "2226_covariate_error_comparison.pdf")),
+                                   ovl_fig, overwrite = TRUE)
 
 cat("\nerror.R complete. Tables in", OUT_DIR, "| figure in", FIG_DIR, "\n")

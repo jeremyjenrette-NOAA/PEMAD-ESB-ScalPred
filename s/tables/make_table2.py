@@ -102,7 +102,8 @@ lines += [r"\bottomrule", r"\end{tabular}%", r"}", r"\vspace{2mm}", r"\begin{flu
           r"$\Delta$LL: out-of-fold log loss minus the lowest log loss in that region ($\times 10^{-3}$; block standard error in brackets). "
           r"RMSE: out-of-fold error of the summed detection probabilities against true-positive counts per image. "
           r"Bold: selected model (simplest model within one standard error of the lowest log loss); $\dagger$: also within one standard error. "
-          r"Models were fitted separately for each region and detector; M00 is the intercept-only (regional base-rate) model.",
+          r"Models were fitted separately for each region and detector; M00 is the intercept-only (regional base-rate) model. "
+          r"For RT-DETR-L (Fig.~4; Table~S5), the same procedure selected M15 on Georges Bank and M10 in the Mid-Atlantic Bight.",
           r"\end{flushleft}", r"\end{table}"]
 open("tables/table2_detgam_cv.tex", "w").write("\n".join(lines) + "\n")
 print("Wrote tables/table2_detgam_cv.tex")

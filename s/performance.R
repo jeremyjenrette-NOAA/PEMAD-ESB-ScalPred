@@ -1,165 +1,83 @@
-library(dplyr)
-library(ggplot2)
-library(patchwork)
-library(stringr)
+# ======================================================================
+# performance.R - detection performance on the Calibration set (Table 1, Fig. S2)
+# for YOLOv12-nano, Cascade R-CNN and RT-DETR-L, by region.
+# Run from s/:  Rscript performance.R
+# Needs: ../data/processed/eval_2226.rds (makedat.R)
+#        ../data/raw_model/2226data_rtdetr_l_gcp_vit_20260924_190833/autotest2226_rtdetr_l.csv
+# Writes ../data/processed/detection_performance_2226.csv, tables/table1_detection.tex,
+#        ../figures/ms_figures/2226_model_performance_summary.pdf|png
+# ======================================================================
+suppressPackageStartupMessages({ library(dplyr); library(tidyr); library(ggplot2); library(patchwork)
+  library(stringr); library(janitor) })
 source("./procfunc.R")
 
-# ============================================================#
-# 1. Load Unified Data and Evaluate
-# ============================================================#
 models <- readRDS("../data/processed/eval_2226.rds")
+names(models)[names(models) == "YOLO"] <- "YOLOv12"
+names(models)[names(models) == "Cascade"] <- "Cascade R-CNN"
 
-# Toggle 'stratify_region = FALSE' if you want pooled overall performance
-out_pr <- evaluate_pr_models(models, stratify_region = TRUE, conf_grid = seq(0, 1, by = 0.0005))
+# RT-DETR-L: same Calibration-set images and matching as the other two (as in n3_ablation.R)
+rt_csv <- "../data/raw_model/2226data_rtdetr_l_gcp_vit_20260924_190833/autotest2226_rtdetr_l.csv"
+if (file.exists(rt_csv)) {
+  img_meta <- models$YOLOv12$img %>% select(-any_of(c("n_auto", "man_density", "auto_density")))
+  at <- read.csv(rt_csv) %>% clean_names() %>%
+    mutate(image_id = str_remove(imagename, "\\.[A-Za-z0-9]+$"),
+           truedetect = tolower(as.character(truedetect)) == "true", spname = tolower(spname)) %>%
+    filter(spname == "scallop", image_id %in% img_meta$image_id)
+  models[["RT-DETR-L"]] <- list(
+    det = at %>% select(-any_of("imagename")) %>% left_join(img_meta %>% select(image_id, region), by = "image_id"),
+    img = img_meta)
+}
+DET <- c("YOLOv12", "Cascade R-CNN", "RT-DETR-L")
+models <- models[intersect(DET, names(models))]
 
-pr_all <- out_pr$pr_all
-p_pr   <- out_pr$p_pr
-map_summary <- out_pr$map_summary
+out <- evaluate_pr_models(models, stratify_region = TRUE, conf_grid = seq(0, 1, by = 0.0005))
+pr_all <- out$pr_all %>%
+  mutate(detector = str_remove(model, " (GB|MAB)$"), region = str_extract(model, "(GB|MAB)$"),
+         detector = factor(detector, levels = DET),
+         region = recode(region, GB = "Georges Bank", MAB = "Mid-Atlantic Bight"))
+best <- pr_all %>% group_by(model) %>% filter(f1 == max(f1, na.rm = TRUE)) %>% slice_max(conf, n = 1) %>% ungroup() %>%
+  left_join(out$map_summary %>% rename(map010 = Average_Precision), by = "model") %>%
+  arrange(detector, region)
+write.csv(best %>% select(detector, region, conf, f1, precision, recall, map010, TP, FP, FN),
+          "../data/processed/detection_performance_2226.csv", row.names = FALSE)
+print(best %>% select(detector, region, conf, f1, precision, recall, map010, TP, FP, FN), width = Inf)
 
-print("=== Average Precision (mAP) Summary ===")
-print(map_summary) # at mAP@0.1
+# ---------------- Table 1 ----------------
+dir.create("tables", showWarnings = FALSE)
+lab <- c("YOLOv12" = "YOLOv12-\\textit{nano}", "Cascade R-CNN" = "Cascade R-CNN", "RT-DETR-L" = "RT-DETR-L")
+n3f <- function(x) sprintf("%.3f", x); big <- function(x) format(x, big.mark = ",", trim = TRUE)
+rows <- character(0)
+for (d in levels(best$detector)) {
+  b <- best %>% filter(detector == d); if (!nrow(b)) next
+  if (length(rows)) rows <- c(rows, "\\midrule")
+  for (i in seq_len(nrow(b))) rows <- c(rows, sprintf("%s & %s & %s & %s & %s & %s & %s & %s & %s \\\\",
+    if (i == 1) lab[[d]] else "", if (b$region[i] == "Georges Bank") "GB" else "MAB",
+    n3f(b$f1[i]), n3f(b$precision[i]), n3f(b$recall[i]), n3f(b$map010[i]), big(b$TP[i]), big(b$FP[i]), big(b$FN[i])))
+}
+n_img <- nrow(models$YOLOv12$img); n_sc <- sum(models$YOLOv12$img$n_annotations)
+writeLines(c("\\begin{table}[htbp]", "\\centering",
+  "\\caption{Detection performance at the maximum-$F_1$ confidence threshold, by model and region, on the Calibration set.}",
+  "\\label{tab:detection_performance_metrics}", "\\resizebox{\\textwidth}{!}{%", "\\begin{tabular}{llccccrrr}", "\\toprule",
+  "\\textbf{Model} & \\textbf{Region} & \\textbf{$F_1$ Score} & \\textbf{Precision} & \\textbf{Recall} & \\textbf{$\\text{mAP}_{0.10}$} & \\textbf{TP} & \\textbf{FP} & \\textbf{FN} \\\\",
+  "\\midrule", rows, "\\bottomrule", "\\end{tabular}%", "}", "\\vspace{2mm}", "\\begin{flushleft}", "\\footnotesize",
+  sprintf("The Calibration set comprises %s images and %s scallops. $\\text{mAP}_{0.10}$: mean Average Precision at IoU 0.1. TP, FP and FN: true positive, false positive and (image-level) false negative counts at the maximum-$F_1$ threshold. GB: Georges Bank; MAB: Mid-Atlantic Bight.",
+          big(n_img), big(n_sc)),
+  "\\end{flushleft}", "\\end{table}"), "tables/table1_detection.tex")
 
-# ============================================================#
-# 2. Optimal F1 Threshold Calculation
-# ============================================================#
-best_pts <- pr_all %>%
-  group_by(model) %>%
-  filter(f1 == max(f1, na.rm = TRUE)) %>%
-  slice_max(conf, n = 1) %>%   # break ties by confidence
-  ungroup()
-
-print("=== Optimal F1 Thresholds ===")
-print(best_pts %>% select(model, conf, f1, precision, recall))
-
-# ============================================================#
-# 3. F1 Curve Visualization (Panel B)
-# ============================================================#
-p_f1 <- ggplot(pr_all, aes(x = conf, y = f1, color = model)) +
-  geom_line(linewidth = 1.2) +
-  theme_minimal() +
-  labs(
-    title = "F1 Score vs Confidence Threshold",
-    x = "Confidence threshold",
-    y = "F1 score",
-    color = "Model by region"
-  )
-
-# ============================================================#
-# 4. Prepare mAP Data and Plot (Panel C)
-# ============================================================#
-map_plot_data <- map_summary %>%
-  mutate(
-    Region = case_when(
-      str_detect(model, " GB$") ~ "Georges Bank",
-      str_detect(model, " MAB$") ~ "Mid-Atlantic Bight",
-      TRUE ~ "Overall"
-    ),
-    Architecture = str_remove(model, " GB$| MAB$")
-  )
-
-p_map <- ggplot(map_plot_data, aes(x = Architecture, y = Average_Precision, fill = Region)) +
-  geom_col(position = position_dodge(width = 0.8), width = 0.7, color = "black", linewidth = 0.5) +
-  geom_text(
-    aes(label = sprintf("%.3f", Average_Precision)), 
-    position = position_dodge(width = 0.8), 
-    vjust = -0.8, 
-    size = 4, 
-    fontface = "bold"
-  ) +
-  scale_y_continuous(limits = c(0, 1.05), labels = scales::percent_format(accuracy = 1)) +
-  scale_fill_manual(values = c("Georges Bank" = "#2C7FB8", "Mid-Atlantic Bight" = "#D95F0E", "Overall" = "grey50")) +
-  labs(
-    title = "Average Precision (mAP@10)",
-    x = "",
-    y = "mAP Score",
-    fill = ""
-  ) +
-  theme_minimal(base_size = 13) +
-  theme(
-    plot.title = element_text(hjust = 0.5, face = "bold"),
-    legend.position = "top",
-    panel.grid.major.x = element_blank()
-  )
-
-# ============================================================#
-# 5. Build the Error Composition Chart (Panel D)
-# ============================================================#
-error_plot_data <- best_pts %>%
-  mutate(
-    Region = case_when(
-      str_detect(model, " GB$") ~ "Georges Bank",
-      str_detect(model, " MAB$") ~ "Mid-Atlantic Bight",
-      TRUE ~ "Overall"
-    ),
-    Architecture = str_remove(model, " GB$| MAB$")
-  ) %>%
-  select(Architecture, Region, FP, FN) %>%
-  tidyr::pivot_longer(cols = c(FP, FN), names_to = "Error_Type", values_to = "Count") %>%
-  mutate(
-    Error_Type = recode(Error_Type, 
-                        "FP" = "False Positives", 
-                        "FN" = "False Negatives")
-  )
-
-p_error <- ggplot(error_plot_data, aes(x = Architecture, y = Count, fill = Error_Type)) +
-  geom_col(position = position_dodge(width = 0.8), width = 0.7, color = "black", linewidth = 0.5) +
-  geom_text(
-    aes(label = Count), 
-    position = position_dodge(width = 0.8), 
-    vjust = -0.5, 
-    size = 3.5, 
-    fontface = "bold"
-  ) +
-  facet_wrap(~ Region) +
-  # Use distinct colors to separate from the regional palette used in p_map
-  scale_fill_manual(values = c("False Positives" = "#E41A1C", "False Negatives" = "#377EB8")) +
-  # Expand the top of the Y-axis so text labels don't get cut off
-  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) + 
-  labs(
-    title = "Model Errors at Optimal F1 Threshold",
-    x = "",
-    y = "Raw Error Count",
-    fill = ""
-  ) +
-  theme_minimal(base_size = 13) +
-  theme(
-    plot.title = element_text(hjust = 0.5, face = "bold"),
-    legend.position = "top",
-    panel.grid.major.x = element_blank(),
-    strip.text = element_text(face = "bold", size = 12)
-  )
-p_error
-# ============================================================#
-# 6. Final 4-Panel Master Assembly
-# ============================================================#
-# By keeping top_row and bottom_row separate before combining, 
-# we prevent patchwork from awkwardly mashing all 3 different legends together.
-top_row <- (p_pr | p_f1) + plot_layout(guides = "collect")
-bottom_row <- (p_map | p_error) 
-
-combined_4panel <- (top_row / bottom_row) + 
-  plot_annotation(tag_levels = 'A')
-
-combined_2panel <- (top_row) + 
-  plot_annotation(tag_levels = 'A')
-
-# print(combined_4panel)
-
-# ============================================================#
-# 7. Save
-# ============================================================#
-ggsave(
-  filename = "../figures/ms_figures/2226_model_performance_summary.pdf", 
-  plot = combined_2panel, 
-  width = 9, 
-  height = 5, 
-  device = "pdf",
-  bg = "white"
-)
-# ggsave(
-#   filename = "~/saltnoaa/presentations/figures/2226_model_performance_summary.png", 
-#   plot = combined_2panel, 
-#   width = 11, 
-#   height = 5, 
-#   bg = "white"
-# )
+# ---------------- Figure (supplement): PR and F1 curves ----------------
+COL <- c("YOLOv12" = "#CB181D", "Cascade R-CNN" = "#2171B5", "RT-DETR-L" = "#238B45")
+th <- theme_bw(base_size = 10) + theme(panel.grid.minor = element_blank(), legend.position = "bottom")
+p_pr <- ggplot(pr_all %>% filter(!is.na(precision), !is.na(recall)),
+               aes(recall, precision, colour = detector, linetype = region)) +
+  geom_path(linewidth = 0.8) + scale_colour_manual(values = COL) + coord_cartesian(xlim = c(0, 1), ylim = c(0, 1)) +
+  labs(x = "Recall", y = "Precision", colour = NULL, linetype = NULL) + th
+p_f1 <- ggplot(pr_all %>% filter(!is.na(f1)), aes(conf, f1, colour = detector, linetype = region)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(data = best, aes(conf, f1), size = 2, show.legend = FALSE) +
+  scale_colour_manual(values = COL) + coord_cartesian(ylim = c(0, 1)) +
+  labs(x = "Confidence threshold", y = expression(F[1] ~ "score"), colour = NULL, linetype = NULL) + th
+fig <- (p_pr | p_f1) + plot_layout(guides = "collect") + plot_annotation(tag_levels = "A") &
+  theme(legend.position = "bottom")
+ggsave("../figures/ms_figures/2226_model_performance_summary.pdf", fig, width = 9, height = 4.6)
+ggsave("../figures/ms_figures/2226_model_performance_summary.png", fig, width = 9, height = 4.6, dpi = 300, bg = "white")
+cat("Wrote Table 1 (tables/table1_detection.tex) and the PR/F1 figure\n")

@@ -85,6 +85,24 @@ p <- ggplot(pd, aes(depth_bin, mean_err, colour = method, group = method)) +
   labs(x = "Bottom depth (m)", y = "Mean error per image (predicted - manual)", colour = NULL) +
   theme_bw(base_size = 9) +
   theme(legend.position = "bottom", axis.text.x = element_text(angle = 45, hjust = 1), panel.grid.minor = element_blank())
-ggsave(file.path(FIG, "2226_depth_density_error.pdf"), p, width = 8, height = 4.8)
-ggsave(file.path(FIG, "2226_depth_density_error.png"), p, width = 8, height = 4.8, dpi = 300, bg = "white")
+# Data support: Holdout test images per depth bin and density class, by region (aligned columns)
+cnt <- ev %>% count(region, depth_bin, density, name = "n_images") %>%
+  tidyr::complete(region, depth_bin, density, fill = list(n_images = 0L)) %>%
+  mutate(region = factor(region, levels = c("GB", "MAB")))
+p_n <- ggplot(cnt, aes(depth_bin, n_images, fill = region)) +
+  geom_col(position = position_dodge(0.8), width = 0.75) +
+  geom_text(aes(label = ifelse(n_images > 0, n_images, "")), position = position_dodge(0.8),
+            vjust = -0.3, size = 1.9, colour = "grey30") +
+  facet_grid(. ~ density, labeller = labeller(density = function(x) paste(x, "scallops"))) +
+  scale_y_continuous(trans = "sqrt", expand = expansion(mult = c(0, 0.15))) +
+  scale_fill_manual(values = c(GB = "grey35", MAB = "grey70"), name = NULL) +
+  labs(x = "Bottom depth (m)", y = "Holdout images") +
+  theme_bw(base_size = 9) +
+  theme(legend.position = "right", axis.text.x = element_text(angle = 45, hjust = 1), panel.grid.minor = element_blank(),
+        strip.text = element_blank(), strip.background = element_blank())
+p_top <- p + theme(axis.title.x = element_blank(), axis.text.x = element_blank(), axis.ticks.x = element_blank())
+fig <- patchwork::wrap_plots(p_top, p_n, ncol = 1, heights = c(2.3, 1), guides = "collect") &
+  theme(legend.position = "bottom")
+ggsave(file.path(FIG, "2226_depth_density_error.pdf"), fig, width = 8, height = 6.2)
+ggsave(file.path(FIG, "2226_depth_density_error.png"), fig, width = 8, height = 6.2, dpi = 300, bg = "white")
 cat("\nDone. Tables in", OUT, "\n")

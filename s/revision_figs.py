@@ -2,6 +2,7 @@
 """Manuscript figures for the leave-one-year-out tests (run from s/).
 
   Fig. S5  tierb2026_effort.pdf  - 2026 calibration accuracy vs annotation effort
+  Fig. S6  tierb2026_effort_cv.pdf - the same, rotating holdout (tierb_effort_cv.R; skipped if not run)
   Fig. S6  tiera_loyo_bias.pdf   - total bias by held-out year (GAMs refit without it)
 
 Reads the CSVs written by tierb/tierb_effort.R and tiera/tiera_loyo.R; writes PDF + PNG
@@ -73,6 +74,47 @@ h, l = axes[0, 0].get_legend_handles_labels()
 fig.legend(h, l, loc="lower center", ncol=3, bbox_to_anchor=(0.5, -0.03))
 fig.tight_layout(rect=(0, 0.06, 1, 1))
 save(fig, "tierb2026_effort")
+
+# ---------------------------------------------------------------- Fig. S5b: effort, rotating holdout (10-fold CV)
+cvp = Path("../data/processed/tierb2026/effort_cv/effort_cv_summary.csv")
+if cvp.exists():
+    c = pd.read_csv(cvp)
+    rates = sorted(c.survey_frames_per_annotated.unique(), reverse=True); xp = {r: i for i, r in enumerate(rates)}
+    xlab = [f"1 in {r:,.0f}" for r in rates]
+    ser = [("Two-stage", "Two-stage calibration (transferred forms)", BLUE, "o"),
+           ("YOLO F1-threshold count", "YOLOv12 F$_1$-threshold count", AQUA, "^")]
+    LIM = {("pct_bias_total", "GB"): (-25, 25), ("pct_bias_total", "MAB"): (-15, 10),
+           ("rmse", "GB"): (0.35, 0.60), ("rmse", "MAB"): (0.13, 0.25)}
+    fig, axes = plt.subplots(2, 2, figsize=(7.0, 5.0), sharex=True)
+    for j, reg in enumerate(["GB", "MAB"]):
+        for i, (metric, ylab) in enumerate([("pct_bias_total", "Total bias (%)"),
+                                             ("rmse", "RMSE (scallops per image)")]):
+            ax = axes[i, j]; style(ax); lo_lim, hi_lim = LIM[(metric, reg)]
+            if metric == "pct_bias_total": ax.axhline(0, color=INK2, lw=0.8, ls="--")
+            for k, (meth, lab, col, mk) in enumerate(ser):
+                d = c[(c.region == reg) & (c.method == meth)].copy()
+                d["x"] = d.survey_frames_per_annotated.map(xp) + (k - 0.5) * 0.14; d = d.sort_values("x")
+                med, mn, mx = d[f"{metric}_med"].values, d[f"{metric}_min"].values, d[f"{metric}_max"].values
+                if metric == "pct_bias_total":
+                    ax.fill_between(d.x, d.bias_lo_med, d.bias_hi_med, color=col, alpha=0.12, lw=0)
+                fmt = (lambda v: f"{v:,.0f}") if metric == "pct_bias_total" else (lambda v: f"{v:,.0f}" if v >= 10 else f"{v:.2f}")
+                for xx, v, m in zip(d.x, mx, med):
+                    if v > hi_lim:
+                        txt = (f"median {fmt(m)}\n" if m > hi_lim else "") + f"max {fmt(v)}"
+                        ax.annotate(txt, (xx, hi_lim), xytext=(4, -2), textcoords="offset points",
+                                    ha="left", va="top", fontsize=6, color=INK2)
+                ax.vlines(d.x, np.maximum(mn, lo_lim), np.minimum(mx, hi_lim), color=col, lw=1.2)
+                ax.plot(d.x, np.clip(med, lo_lim, hi_lim), color=col, lw=1.5, marker=mk, ms=4.5, mec="white", mew=0.8,
+                        label=lab)
+            ax.set_ylim(lo_lim, hi_lim)
+            if j == 0: ax.set_ylabel(ylab)
+            if i == 0: ax.set_title("Georges Bank" if reg == "GB" else "Mid-Atlantic Bight", fontsize=9, color=INK)
+            ax.set_xticks(range(len(rates))); ax.set_xticklabels(xlab, rotation=30, ha="right")
+    fig.supxlabel("Annotation rate used to fit the GAMs (annotated frames per survey frames)", fontsize=8, color=INK, y=0.03)
+    h, l = axes[0, 0].get_legend_handles_labels()
+    fig.legend(h, l, loc="lower center", ncol=2, bbox_to_anchor=(0.5, -0.03))
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
+    save(fig, "tierb2026_effort_cv")
 
 # ---------------------------------------------------------------- Fig. S6: Tier A
 m = pd.read_csv("../data/processed/tiera/tiera_holdout_metrics.csv")
