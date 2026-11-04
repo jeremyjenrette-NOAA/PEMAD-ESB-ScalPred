@@ -16,3 +16,8 @@ pred/yolo_deploy/**/model/
 pred/yolo_deploy/**/images/
 pred/yolo_deploy/**/runs/
 pred/yolo_deploy/**/output/
+
+# archived scripts and caches (kept locally, not part of the release)
+s/archived_*/
+pred/pred_archive/
+s/marmap_coord_*.csv

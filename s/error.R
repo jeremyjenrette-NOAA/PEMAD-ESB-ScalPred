@@ -200,9 +200,16 @@ plot_covariate_error <- function(df, x_var, x_label) {
   # dodge proportional to the typical gap between bin centres, per region
   gap <- bd %>% distinct(region, x_bin, x_mid) %>% group_by(region) %>% arrange(x_mid, .by_group = TRUE) %>%
     summarise(g = median(diff(x_mid)), .groups = "drop")
-  bd <- bd %>% left_join(gap, by = "region") %>%
-    mutate(g = ifelse(is.finite(g) & g > 0, g, 1),
-           x_plot = x_mid + (as.integer(factor(Method, levels = PLOT_METHODS)) - 2) * 0.22 * g)
+  # fallback when a region has a single bin: a tenth of the covariate's 5-95% range
+  rng <- d %>% group_by(region) %>%
+    summarise(r = diff(quantile(.data[[x_var]], c(0.05, 0.95), na.rm = TRUE)), .groups = "drop") %>%
+    mutate(r = ifelse(is.finite(r) & r > 0, r / 10, 0.05))
+  bd <- bd %>% left_join(gap, by = "region") %>% left_join(rng, by = "region") %>%
+    mutate(g = ifelse(is.finite(g) & g > 0, g, r),
+           # offset: the smaller of a fifth of the bin gap and 1.5% of the covariate's 5-95% range,
+           # so points never look as if they sit at different covariate values
+           off = pmin(0.2 * g, 0.15 * r),
+           x_plot = x_mid + (as.integer(factor(Method, levels = PLOT_METHODS)) - 2) * off)
   ggplot(bd, aes(x = x_plot, y = mean_err, colour = Method)) +
     geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
     geom_linerange(aes(ymin = mean_err - 1.96 * se_err, ymax = mean_err + 1.96 * se_err), linewidth = 0.4) +
@@ -228,8 +235,10 @@ write.csv(image_error_summary, file.path(OUT_DIR, "holdout_image_error_summary_2
 # Detection-structure panels: images WITH detections only (images without
 # detections carry fill-in values that would pile up in one bin)
 struct_vars <- intersect(names(STRUCTURE), names(err_long))
+# Box size needs one detection; shares and spacing are only informative with >= 2
+# (with one detection overlap = 0, spacing = cap and the low-confidence share is 0 or 1).
 struct_plots <- lapply(struct_vars, function(v)
-  plot_covariate_error(err_long %>% filter(n_det_all > 0), v, STRUCTURE[[v]]))
+  plot_covariate_error(err_long %>% filter(n_det_all >= if (v == "med_box_mm") 1 else 2), v, STRUCTURE[[v]]))
 
 # ----------------------------------------------------------------------
 # 5b. Calibration by PREDICTED count

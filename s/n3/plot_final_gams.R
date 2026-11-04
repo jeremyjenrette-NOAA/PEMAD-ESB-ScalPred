@@ -40,9 +40,7 @@ p1 <- ggplot(s1_curve, aes(conf, p)) +
   geom_point(data = s1_obs, aes(conf, rate, size = n), colour = "grey30", alpha = 0.7) +
   facet_wrap(~ region) + scale_size_area(max_size = 3, guide = "none") +
   coord_cartesian(ylim = c(0, 1)) + theme_bw(base_size = 11) +
-  labs(x = "YOLOv12 confidence", y = "P(detection is a scallop)",
-       title = "Stage 1: confidence to detection probability",
-       subtitle = "Line: GAM, other covariates at their medians (95% CI). Points: observed share of true positives per 0.05 confidence bin.") +
+  labs(x = "YOLOv12 confidence", y = "P(detection is a scallop)") +
   theme(panel.grid.minor = element_blank())
 
 # ---------------- Stage 2 ----------------
@@ -95,14 +93,38 @@ p2 <- ggplot(s2_curve, aes(pred_Y, fit)) +
   scale_colour_manual(values = cols, name = NULL) + scale_fill_manual(values = cols, guide = "none") +
   theme_bw(base_size = 11) +
   labs(x = expression("Stage 1 expected count per image (" * Sigma * p[det] * ")"),
-       y = "Final count (line) / manual count (points)",
-       title = "Stage 2: stage 1 expected count to final calibrated count",
-       subtitle = "Tweedie GAM, log link, 95% CI; log(1 + x) axes. Dashed 1:1 = no change from stage 1; above it the model adds missed scallops, below it removes false ones.") +
+       y = "Calibrated count (line) / manual count (points)") +
   theme(legend.position = "bottom", panel.grid.minor = element_blank())
 
-fig <- p1 / p2 + plot_layout(heights = c(1, 1.15))
-ggsave(file.path(FIG, "2226_final_gams_yolo.pdf"), fig, width = 10, height = 9)
-ggsave(file.path(FIG, "2226_final_gams_yolo.png"), fig, width = 10, height = 9, dpi = 300, bg = "white")
+# ---------------- Stage-2 inputs: distribution of the image features ----------------
+# Calibration-fitting images with at least one YOLOv12 detection, coloured by the number
+# of detections. Shares and spacing are only informative when an image has several
+# detections: with one detection, overlap is 0, spacing is capped at 5 and the
+# low-confidence share is 0 or 1.
+FEAT <- c(lowconf_frac_Y = "Share below F1 threshold", med_box_mm_Y = "Median box size (mm)",
+          overlap_frac_Y = "Share of overlapping boxes", nn_ratio_Y = "NN spacing / box size")
+ndet_col <- intersect(c("n_det_all_Y", "n_det_Y"), names(cal))[1]
+feat_long <- cal %>% filter(.data[[ndet_col]] >= 1) %>%
+  mutate(region = unname(REG[as.character(region)]),
+         ndet = cut(.data[[ndet_col]], c(0, 1, 5, Inf), labels = c("1 detection", "2-5", "> 5"))) %>%
+  select(region, ndet, all_of(names(FEAT))) %>%
+  pivot_longer(all_of(names(FEAT)), names_to = "feature", values_to = "value") %>%
+  mutate(feature = factor(FEAT[feature], levels = FEAT))
+p3 <- ggplot(feat_long, aes(value, fill = ndet)) +
+  geom_histogram(bins = 20, colour = "white", linewidth = 0.1) +
+  facet_grid(region ~ feature, scales = "free") +
+  scale_fill_manual(values = c("1 detection" = "#C6DBEF", "2-5" = "#6BAED6", "> 5" = "#08519C"),
+                    name = "YOLOv12 detections per image") +
+  theme_bw(base_size = 10) + labs(x = NULL, y = "Calibration-fitting images") +
+  theme(legend.position = "bottom", panel.grid.minor = element_blank(), strip.text = element_text(size = 8))
+
+fig <- (p1 / p2 / p3) + plot_layout(heights = c(1, 1.15, 1.1)) + plot_annotation(tag_levels = "A")
+ggsave(file.path(FIG, "2226_final_gams_yolo.pdf"), fig, width = 10, height = 12.5)
+ggsave(file.path(FIG, "2226_final_gams_yolo.png"), fig, width = 10, height = 12.5, dpi = 300, bg = "white")
+ovl <- path.expand("~/Library/CloudStorage/Dropbox/Apps/Overleaf/NEFSC-scallop-detection/ms_figures")
+if (dir.exists(ovl)) file.copy(file.path(FIG, "2226_final_gams_yolo.pdf"), ovl, overwrite = TRUE)
+cat("Images with >= 2 detections (share of Calibration-fitting):\n")
+print(cal %>% group_by(region) %>% summarise(n = n(), ge1 = mean(.data[[ndet_col]] >= 1), ge2 = mean(.data[[ndet_col]] >= 2)))
 
 # ---------------- Term tables ----------------
 terms <- bind_rows(
