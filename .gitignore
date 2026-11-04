@@ -1,3 +1,11 @@
 data/
 figures/
 train_arc/output
+
+# OS / R session junk and local staging
+.DS_Store
+**/.DS_Store
+.Rhistory
+**/.Rhistory
+train_arc/zenodo_stage/
+train_arc/data2226/
