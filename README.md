@@ -14,7 +14,7 @@ This repository is a scientific product and is not official communication of the
 
 PEMAD-ESB-ScalPred turns object-detector outputs on HabCam benthic imagery into bias-corrected counts, densities and shell heights of Atlantic sea scallops (*Placopecten magellanicus*). It is the analysis code for Jenrette et al., *Automatically counting and measuring Atlantic sea scallops (Placopecten magellanicus) from underwater imagery with object detection and bias-correction* (Ecological Informatics, in revision).
 
-Detectors (YOLOv12n, Cascade R-CNN and RT-DETR-L) are trained in the companion repository [PEMAD-ESB-ScalTrain](https://github.com/jeremyjenrette-NOAA/PEMAD-ESB-ScalTrain) ([10.5281/zenodo.23967412](https://doi.org/10.5281/zenodo.23967412)). This repository takes their boxes and confidences, plus each image's metadata, and calibrates them in two stages with generalized additive models (GAMs):
+Detectors (YOLOv12n, Cascade R-CNN and RT-DETR-L) are trained in the companion repository [PEMAD-ESB-ScalTrain](https://github.com/jeremyjenrette-NOAA/PEMAD-ESB-ScalTrain) ([10.5281/zenodo.23967411](https://doi.org/10.5281/zenodo.23967411)). This repository takes their boxes and confidences, plus each image's metadata, and calibrates them in two stages with generalized additive models (GAMs):
 
 1. **Detection level (false positives).** A binomial GAM with a logit link gives each detection's probability of being a scallop from its confidence and, where selected, image and environmental covariates. Summing the probabilities in an image gives its expected number of true detections, N̂ = Σ p.
 2. **Image level (missed scallops).** A Tweedie GAM with a log link predicts the manual count from ℓ = log(1 + N̂) and image features describing detection confidence and crowding (the share of detections below the regional F1 threshold, median box size, box overlap and nearest-neighbour spacing).
@@ -27,7 +27,7 @@ Model forms are chosen by five-fold block cross-validation on whole transect blo
 
 This repository reproduces every calibration, abundance and size result in Jenrette et al., *Automatically counting and measuring Atlantic sea scallops (Placopecten magellanicus) from underwater imagery with object detection and bias-correction* (Ecological Informatics, in revision). Detector training is in the companion repository [PEMAD-ESB-ScalTrain](https://github.com/jeremyjenrette-NOAA/PEMAD-ESB-ScalTrain); you do not need it to reproduce the results, because the detector outputs are in the data record.
 
-**1. Get the data.** Download `pipeline_inputs.zip` from the Zenodo data record ([10.5281/zenodo.23481212](https://doi.org/10.5281/zenodo.23481212)) and unzip it in the repository root. It recreates `data/raw/` and `data/raw_model/` exactly as the scripts read them (check with `md5sum -c checksums_pipeline_inputs.md5`). The record's cleaned tables (`image_metadata.csv`, `annotations.csv`, `detections_<model>.csv`) document the same data with readable column names; the Calibration-set images are only needed to rerun the detectors.
+**1. Get the data.** Download `pipeline_inputs.zip` from the Zenodo data record ([10.5281/zenodo.23481212](https://doi.org/10.5281/zenodo.23481212); the DOI is reserved and resolves once the record is published with the paper) and unzip it in the repository root. It recreates `data/raw/` and `data/raw_model/` exactly as the scripts read them (check with `md5sum -c checksums_pipeline_inputs.md5`). The record's cleaned tables (`image_metadata.csv`, `annotations.csv`, `detections_<model>.csv`) document the same data with readable column names; the Calibration-set images are only needed to rerun the detectors.
 
 **2. Install.** R (>= 4.3) with `mgcv`, `dplyr`, `tidyr`, `ggplot2`, `patchwork`, `stringr`, `janitor`, `scales`, `ranger`, `xgboost`, `maps` and `marmap`; Python 3 with `pip install -r requirements.txt` (pandas, numpy, scipy, matplotlib). No GPU is needed.
 
@@ -90,9 +90,9 @@ Calibration models fitted on other years should not be reused unchanged: in our 
 
 If you use this code, please cite the paper and the archived release:
 
-Jenrette, J.F., Hart, D.R., Chang, J.-H., Fairclough, C., McManus, M.C. PEMAD-ESB-ScalPred: two-stage GAM calibration, abundance and shell-height analysis for automated sea scallop counts. Zenodo. https://doi.org/10.5281/zenodo.23967378
+Jenrette, J.F., Hart, D.R., Chang, J.-H., Fairclough, C., McManus, M.C. PEMAD-ESB-ScalPred: two-stage GAM calibration, abundance and shell-height analysis for automated sea scallop counts. Zenodo. https://doi.org/10.5281/zenodo.23967377
 
-Data: https://doi.org/10.5281/zenodo.23481212
+Data: https://doi.org/10.5281/zenodo.23481212 (resolves once the record is published with the paper)
 
 ## License
 
