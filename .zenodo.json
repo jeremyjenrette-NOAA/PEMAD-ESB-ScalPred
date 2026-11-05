@@ -1,0 +1,44 @@
+{
+  "title": "PEMAD-ESB-ScalPred: two-stage GAM calibration, abundance and shell-height analysis for automated sea scallop counts",
+  "upload_type": "software",
+  "description": "R and Python workflow that calibrates object-detector outputs (YOLOv12, Cascade R-CNN, RT-DETR-L) on HabCam imagery with detection-level and image-level generalized additive models, evaluates them on block-structured holdouts and leave-one-year-out tests, and validates automated shell-height measurements.",
+  "creators": [
+    {
+      "name": "Jenrette, Jeremy F.",
+      "affiliation": "NOAA Fisheries, Northeast Fisheries Science Center; Saltwater Inc."
+    },
+    {
+      "name": "Hart, Deborah R.",
+      "affiliation": "NOAA Fisheries, Northeast Fisheries Science Center"
+    },
+    {
+      "name": "Chang, Jui-Han",
+      "affiliation": "NOAA Fisheries, Northeast Fisheries Science Center"
+    },
+    {
+      "name": "Fairclough, Cameron",
+      "affiliation": "NOAA Fisheries, Northeast Fisheries Science Center"
+    },
+    {
+      "name": "McManus, M. Conor",
+      "affiliation": "NOAA Fisheries, Northeast Fisheries Science Center"
+    }
+  ],
+  "license": "Apache-2.0",
+  "keywords": [
+    "Placopecten magellanicus",
+    "sea scallop",
+    "HabCam",
+    "object detection",
+    "generalized additive model",
+    "calibration"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "10.5281/zenodo.23481212",
+      "relation": "isSupplementTo",
+      "resource_type": "dataset",
+      "scheme": "doi"
+    }
+  ]
+}
