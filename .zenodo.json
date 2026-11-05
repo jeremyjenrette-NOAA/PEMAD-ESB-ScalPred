@@ -1,0 +1,44 @@
+{
+  "title": "PEMAD-ESB-ScalTrain: training and evaluation of sea scallop object detectors on HabCam imagery",
+  "upload_type": "software",
+  "description": "Slurm jobs and Python scripts that build the stratified HabCam training and evaluation sets, train YOLOv12n, RT-DETR-L and Cascade R-CNN (VIAME) scallop detectors, score them with Hungarian matching, and stage the Zenodo data record.",
+  "creators": [
+    {
+      "name": "Jenrette, Jeremy F.",
+      "affiliation": "NOAA Fisheries, Northeast Fisheries Science Center; Saltwater Inc."
+    },
+    {
+      "name": "Hart, Deborah R.",
+      "affiliation": "NOAA Fisheries, Northeast Fisheries Science Center"
+    },
+    {
+      "name": "Chang, Jui-Han",
+      "affiliation": "NOAA Fisheries, Northeast Fisheries Science Center"
+    },
+    {
+      "name": "Fairclough, Cameron",
+      "affiliation": "NOAA Fisheries, Northeast Fisheries Science Center"
+    },
+    {
+      "name": "McManus, M. Conor",
+      "affiliation": "NOAA Fisheries, Northeast Fisheries Science Center"
+    }
+  ],
+  "license": "Apache-2.0",
+  "keywords": [
+    "Placopecten magellanicus",
+    "sea scallop",
+    "HabCam",
+    "object detection",
+    "generalized additive model",
+    "calibration"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "10.5281/zenodo.23481212",
+      "relation": "isSupplementTo",
+      "resource_type": "dataset",
+      "scheme": "doi"
+    }
+  ]
+}
