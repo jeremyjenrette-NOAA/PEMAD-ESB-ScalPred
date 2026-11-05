@@ -82,7 +82,7 @@ ${VIAME_INSTALL}/bin/python -m viame.pytorch.netharn.detect_fit \
   --window_dims=640,640 \
   --window_overlap=0.20 \
   --multiscale=False \
-  --batch_size=16 \
+  --batch_size=32 \
   --bstep=4 \
   --lr=0.001 \
   --timeout=1209600 \
