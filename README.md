@@ -11,105 +11,21 @@ Email: jeremy.jenrette@noaa.gov
 This repository is a scientific product and is not official communication of the National Oceanic and Atmospheric Administration, or the United States Department of Commerce. All NOAA GitHub project code is provided on an ‘as is’ basis and the user assumes responsibility for its use. Any claims against the Department of Commerce or Department of Commerce bureaus stemming from the use of this GitHub project will be governed by all applicable Federal law. Any reference to specific commercial products, processes, or services by service mark, trademark, manufacturer, or otherwise, does not constitute or imply their endorsement, recommendation or favoring by the Department of Commerce. The Department of Commerce seal and logo, or the seal and logo of a DOC bureau, shall not be used in any manner to imply endorsement of any commercial product or activity by DOC or the United States Government.
 
 ## Description
-PEMAD-ESB-ScalPred is a framework for automated detection, abundance estimation, and size inference of Atlantic sea scallops (***Placopecten magellanicus***) from large-scale benthic imagery collected by the HabCam system.
 
-The project integrates the latest object detection models (YOLO and Cascade R-CNN with VIAME) with statistical calibration workflows to address well-known sources of bias in image-based ecological surveys, including false positives, false negatives, and environmental variability. The resulting outputs provide spatially and temporally scalable estimates of scallop abundance and size structure, supporting fisheries assessment and ecosystem monitoring.
+PEMAD-ESB-ScalPred turns object-detector outputs on HabCam benthic imagery into bias-corrected counts, densities and shell heights of Atlantic sea scallops (*Placopecten magellanicus*). It is the analysis code for Jenrette et al., *Automatically counting and measuring Atlantic sea scallops (Placopecten magellanicus) from underwater imagery with object detection and bias-correction* (Ecological Informatics, in revision).
 
-This repository contains the code necessary to evaluate trained raw model outputs with image metadata. Here, we can train Generative Additive Models (GAMs), perform inference, predict calibrated abundance estimates, and predict length classes.  Included are figures and diagnostic plots. To see the **Detection Training** repository, visit...
+Detectors (YOLOv12n, Cascade R-CNN and RT-DETR-L) are trained in the companion repository [PEMAD-ESB-ScalTrain](https://github.com/jeremyjenrette-NOAA/PEMAD-ESB-ScalTrain) ([10.5281/zenodo.23967412](https://doi.org/10.5281/zenodo.23967412)). This repository takes their boxes and confidences, plus each image's metadata, and calibrates them in two stages with generalized additive models (GAMs):
 
-### Project
+1. **Detection level (false positives).** A binomial GAM with a logit link gives each detection's probability of being a scallop from its confidence and, where selected, image and environmental covariates. Summing the probabilities in an image gives its expected number of true detections, N̂ = Σ p.
+2. **Image level (missed scallops).** A Tweedie GAM with a log link predicts the manual count from ℓ = log(1 + N̂) and image features describing detection confidence and crowding (the share of detections below the regional F1 threshold, median box size, box overlap and nearest-neighbour spacing).
 
-![How does it work?](figures/NEFSC-scal-flowchart.png)
+Model forms are chosen by five-fold block cross-validation on whole transect blocks. The recommended workflow is YOLOv12n with two-stage calibration, refitted each survey year on a systematic annotated subsample (about 0.3% of survey frames was enough in 2026).
 
-PEMAD-ESB-ScalPred provides:
-
-* Automating scallop detection across multi-year survey datasets (2022–2024)
-* Integrating predictions with environmental and survey metadata
-* Calibrating detection outputs using Generative Additive Models
-* Converting raw detections into biologically meaningful quantities:
-
-  * **Density (n m⁻²)**
-  * **Length distributions (mm)**
-  * **Spatial abundance patterns**
-
-```
-.
-├── data
-│   ├── images # diagnostic images
-│   │   ├── 202203.20220515.135703301.59728.png
-│   │   └── 202203.20220515.224949946.9971.png
-│   │
-│   ├── processed
-│   │   ├── Cas2224.RData # VIAME trained + evaluated model paired with metadata
-│   │   ├── YOLOv122224.RData # YOLOv12 trained + evaluated paired with metadata
-│   │   ├── completed/ # these are all images processed by the detection model
-│   │   │   └── completed_yolo_2024.txt
-│   │   ├── detections/ # these are all images WITH DETECTIONS
-│   │   │   └── detections_yolo_2024.csv
-│   │   └── metapred/ # metadata folder
-│   │       └── meta_all2224.csv
-│   │
-│   └── raw # evaluated models and raw weights, also contains other unprocessed data
-│       ├── 2022scallop_viame_257794/
-│       │   └── run_summary.csv
-│       ├── 2022scallop_yolo11n_242222/
-│       │   ├── results.csv
-│       │   └── weights/
-│       │       └── best.pt
-│       └── groundtruth2224.csv
-│
-├── doc
-│
-├── figures
-│   ├── 2224_caldense.jpg
-│   ├── 2224_lengthdist.jpg
-│   ├── 2224_totalcal.jpg
-│   ├── 2224yolov12cas_gammod.png
-│   ├── NEFSC-scal-flowchart.png
-│   └── diag1/
-│       └── 2224_yolo_compare_m7.jpg
-│
-├── length # for calculating length from boxes and other diagnostics
-│   ├── findlengths.R
-│   └── lengthfunc.R
-│
-├── pred # for dataset-wide inference using YOLO and Cascade R-CNN
-│   ├── calpred.R
-│   ├── predfunc.R
-│   ├── predict_habcam_yolo.py
-│   ├── imglist.sh
-│   ├── view_overlap.R
-│   └── viame_project2224/
-│       ├── category_models/
-│       │   └── detector.pipe
-│       ├── pipelines/
-│       │   └── detector_project_folder.pipe
-│       ├── predict_habcam_viame.py
-│       ├── run_trained_model.sh
-│       └── README_PROJECT_FOLDER.md
-│
-├── s # data-processing and visualization scripts
-│   ├── datfunc.R
-│   ├── fitfunc.R
-│   ├── gammod.R
-│   ├── gamstrat.R
-│   ├── strat_vis.R
-│   ├── performance.R
-│   └── procfunc.R
-│
-├── tex # LaTeX
-│   ├── main.tex
-│   ├── main.pdf
-│   └── compile_main.sh
-│
-├── README.md
-├── requirements.txt
-└── LICENSE
-```
+![Workflow](doc/workflow_flowchart.png)
 
 ## Reproducing the manuscript
 
-This repository (release `v1.1-revision1`) reproduces every calibration, abundance and size result in Jenrette et al., *Automatically counting and measuring Atlantic sea scallops (Placopecten magellanicus) from underwater imagery with object detection and bias-correction* (Ecological Informatics, in revision). Detector training is in the companion repository [PEMAD-ESB-ScalTrain](https://github.com/jeremyjenrette-NOAA/PEMAD-ESB-ScalTrain); you do not need it to reproduce the results, because the detector outputs are in the data record.
+This repository reproduces every calibration, abundance and size result in Jenrette et al., *Automatically counting and measuring Atlantic sea scallops (Placopecten magellanicus) from underwater imagery with object detection and bias-correction* (Ecological Informatics, in revision). Detector training is in the companion repository [PEMAD-ESB-ScalTrain](https://github.com/jeremyjenrette-NOAA/PEMAD-ESB-ScalTrain); you do not need it to reproduce the results, because the detector outputs are in the data record.
 
 **1. Get the data.** Download `pipeline_inputs.zip` from the Zenodo data record ([10.5281/zenodo.23481212](https://doi.org/10.5281/zenodo.23481212)) and unzip it in the repository root. It recreates `data/raw/` and `data/raw_model/` exactly as the scripts read them (check with `md5sum -c checksums_pipeline_inputs.md5`). The record's cleaned tables (`image_metadata.csv`, `annotations.csv`, `detections_<model>.csv`) document the same data with readable column names; the Calibration-set images are only needed to rerun the detectors.
 
@@ -138,249 +54,50 @@ This repository (release `v1.1-revision1`) reproduces every calibration, abundan
 
 The 2026 split (`dataset_split_tierb2026.csv`) is shipped in the record; `tierb/split_tierb2026.py` documents how it was drawn.
 
-## Workflow
+## Repository layout
 
-The pipeline follows a structured, end-to-end workflow:
-
-<img src="figures/diag2/stratified.png" width="700"> 
----
-
-### 1. Data Ingestion and Preparation
-
-**Inputs**
-
-* `autotest` → automated detections
-* `mantest` → ground-truth annotations
-* metadata → environmental + image-level covariates
-
-**Scripts**
-
-* `makedat.R` → data loading and formatting
-* `datfunc.R` → processing functions + table construction
-
-**Process**
-
-1. Load `autotest`, `mantest`, and metadata using `makedat.R`
-2. Pass inputs to `build_detection_tables()`
-3. Perform spatial matching between detections and annotations
-4. Assign detection labels:
-
-   * True Positive (TP)
-   * False Positive (FP)
-
-* Stratify both tables by region (e.g., GB vs. MAB)
-
-**Outputs**
-
-* **Detection-level table**
-
-  * One row per detection
-  * Includes TP/FP classification
-
-* **Image-level table**
-
-  * One row per image
-  * `n_auto` → number of automated detections
-  * `n_manual` → number of ground-truth annotations
-
-* For subsequent steps, load saved model data with `load("../data/processed/YOLOv122224.RData")`
-
----
-
-### 2. Model Performance
-
-**Scripts**
-
-* `performance.R` → data loading and formatting
-* `procfunc.R` → processing functions + table construction
-
-* Object detection models trained using:
-
-  * **YOLO (Ultralytics)** - tested with v11, v12, v26
-  * **Cascade R-CNN (VIAME framework)**
-* Model outputs include:
-
-  * Bounding boxes
-  * Confidence scores
-  * IoU, match boolean via Hungarian Algorithm `truedetect`
-* Performance evaluated using held-out datasets (F1, precision-recall) `evaluate_pr_models()`
-
----
-
-### 3. Prediction Calibration
-
-* Detection-level predictions are calibrated using **Generalized Additive Models (GAMs)**
-* Calibration accounts for:
-
-  * Environmental conditions (e.g., depth, backscatter, turbidity)
-  * Detection uncertainty (confidence scores)
-* Produces **probabilistic detection estimates** (p(detection))
-
-**Scripts**
-
-* `strat_vis.R` → training data stratitifcation visualization
-
-<div style="text-align: center;">
-    <img src="figures/diag2/2224_spatial_strat_grid.jpg" width="750">
-</div>
-
-* `gamstrat.R` → data loading and metric visualization
-
-<div style="text-align: center;">
-    <img src="figures/diag2/2224_YOLOv12strat2224_count_strat.png" width="750">
-</div>
-
-* `gamfunc.R` → prediction and plotting functions
-* `fitfunc.R` → detection-level GAMs by region
-* `gammod.R` → image-level GAM
-
-**Modeling**
-* stratified by *region* and *detection model*
-
-$$
-P(\text{Scallop}_i)  =
-f_1(\mathrm{conf}_i,\mathrm{bottomDepth}_i) +
-f_2(\mathrm{altitude}_i,\mathrm{backscatter}_i) +
-f_3(\mathrm{latitude}_i,\mathrm{longitude}_i)
-$$
-
-$$
-P(\text{TotalCount}_i) = \text{region}_i +
-f[\mathrm{Cascade}_i,\mathrm{(Cascade - YOLO)}_i]
-$$
-
-<div style="text-align: center;">
-    <img src="figures/diag2/2224yolov12cas_gammod.png" width="550">
-</div>
-
-<div style="text-align: center;">
-    <img src="figures/diag2/2224total_error.png" width="550">
-</div>
-
-
-**Outputs**
-
-* **Predictions & Diagnostic plots**
-
-  * Raw confidence --> P(Detection)
-  * True vs. predicted counts (stratified by region and includes F_1 score cutoff)
-  * Calibration by depth visual
-
-
-### 4. Dataset-wide Inference
-
-Folders 
-* `pred/`
-* `viame_project2224/`
-
-**Scripts**
-
-* `predict_habcam_yolo.py` → runs trained YOLO model on year-specified HabCam dataset
-Run:
 ```
-nohup python predict_habcam_yolo.py \
-  --model ../models/2224scallop_yolo12n_261070/weights/best.pt \
-  --inventory img_inventory_out/img_inventory_2022_2024_compiled.tsv \
-  --outdir pred_out_2023_2 \
-  --year 2023 \
-  --model_name YOLOv12 \
-  --split right \
-  --process_col process_image15 \
-  --batch_size 16 \
-  --device 1 \
-  --conf 0.01 \
-  --nms_iou 0.65 \
-  --imgsize 1024 \
-  --max_detections 300 > predict_2023.log 2>&1 &
+s/                  calibration, evaluation and figure scripts (run from s/)
+  makedat.R           joins detections, annotations and metadata -> data/processed/eval_2226.rds
+  gamstrat.R          detection-level GAM selection by block CV (Table 1)
+  gammod.R            image-level inputs and the original image-level GAMs
+  performance.R       precision-recall and F1 curves (Fig. 3, Table S1)
+  error.R             Holdout test error by covariate, image feature and space (Fig. 6, Fig. S9)
+  n3/                 ablation of calibration steps and detectors, image-level selection,
+                      random forest / boosted trees, fitted-GAM figure
+  tierb/              independent 2026 survey test and annotation effort
+  tiera/              leave-one-year-out calibration test
+  tables/             scripts that write the LaTeX tables
+  *func.R             shared functions (data, fitting, cross-validation, plotting)
+  reproduce_paper.sh  runs everything in order (see above)
+  run_pipeline.sh     core pipeline only: makedat -> gamstrat -> gammod -> error
+length/             shell-height matching and validation (Fig. 7, Figs. S6-S7, Table S4)
+pred/               survey-wide inference: run YOLOv12n (yolo_deploy/) or Cascade R-CNN
+                    (viame_project2224/) on new imagery
+data/               not tracked; filled from the Zenodo record (pipeline_inputs.zip)
+figures/            not tracked; written by the scripts
 ```
 
-* `run_trained_model.bat` → runs trained VIAME-based Cascade R-CNN model year-specified HabCam dataset
-    - customize this script for model, year, `input_list.txt`
-    - designed for Windows-based processing
+## Applying the calibration to new imagery
 
-* Trained models deployed across full survey datasets
-* Outputs stored as:
+1. Run a trained detector over the survey images: `pred/yolo_deploy/` (YOLOv12n, Windows or Linux) or `pred/viame_project2224/` (Cascade R-CNN in VIAME). Trained weights are in the data record.
+2. Annotate a systematic subsample of the same survey (about one frame in 333 was enough in 2026), and evaluate the detector on it with the matching scripts in PEMAD-ESB-ScalTrain.
+3. Refit both GAM stages on that subsample and predict every image. `tierb/tierb_calibration.R` is the reference implementation of this single-survey refit (it is what the paper's independent 2026 test runs). `pred/inference_run.R` applies the detection-level GAMs to survey-wide detections but still uses the image-level models of the original submission and is not part of the paper's results.
 
-  * `detections_*.csv` (detections only)
-  * `completed_*.txt` (all processed images)
+Calibration models fitted on other years should not be reused unchanged: in our tests they did not transfer to densities those years lacked.
 
----
+## Citation
 
+If you use this code, please cite the paper and the archived release:
 
-### 5. Abundance Estimation
+Jenrette, J.F., Hart, D.R., Chang, J.-H., Fairclough, C., McManus, M.C. PEMAD-ESB-ScalPred: two-stage GAM calibration, abundance and shell-height analysis for automated sea scallop counts. Zenodo. https://doi.org/10.5281/zenodo.23967378
 
-**Scripts**
+Data: https://doi.org/10.5281/zenodo.23481212
 
-* `calpred2.R` → load GAMs, predict, diagnostics, estimate abundance
+## License
 
-* Image-level abundance computed as:
-
-$$
-\hat{N}_{\text{image}} = \sum_i p_i
-$$
-
-* Density using field-of-view metadata:
-
-$$
-\hat{D} = \frac{\sum_i p_i}{\text{area}_{\text{image}}}
-$$
-
----
-
-### 6. Length Estimation
-
-**Scripts**
-
-* `findlengths.R` → show stereo lengths, plot diagnostics, simulate sample effort
-* `lengthfunc.R` → functions to convert box to line and simulate sample size
-
-* Bounding boxes converted to scallop length using pixel-to-mm scaling
-* Produces:
-
-  * Individual size estimates
-  * Population-level length distributions
-
----
-
-### 7. Visualization and Diagnostics
-
-* Model comparisons (YOLO vs Cascade R-CNN)
-* Calibration diagnostics
-* Spatial and depth-based trends
-* Length-frequency distributions
-
-Outputs are stored in `/figures` and used for manuscript development.
-
----
-
-## Results
-
-This framework demonstrates that:
-
-* Deep learning models can reliably detect scallops across heterogeneous benthic environments
-* **Calibration is essential** to correct systematic detection bias
-* Probabilistic predictions outperform threshold-based counting approaches
-* Automated workflows can produce:
-
-  * **Accurate abundance estimates**
-  * **Robust size distributions**
-  * **Scalable survey analytics**
-
-Across the 2022–2024 datasets, the pipeline enables:
-
-* Processing of **millions of images**
-* Generation of **survey-wide density estimates**
-* Consistent comparison across models and years
-
----
-
-## Key Contributions
-
-* End-to-end pipeline linking **computer vision → statistical ecology**
-* Integration of **multiple detection frameworks** in a unified workflow
-* Explicit handling of **false positives and false negatives**
-* Scalable methodology for **image-based fisheries assessment**
-
----
+Apache License 2.0 (see `LICENSE`). The data record is released under CC0 1.0.
 
 ## Contact
+
+Jeremy F. Jenrette, NOAA Fisheries, Northeast Fisheries Science Center (jeremy.jenrette@noaa.gov)
