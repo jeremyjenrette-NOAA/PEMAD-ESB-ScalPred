@@ -29,7 +29,56 @@ def load_taxonomy(taxonomy_json: str) -> dict:
         taxonomy = json.load(f)
     if "classes" not in taxonomy:
         raise ValueError(f"Taxonomy config {taxonomy_json} is missing a 'classes' key.")
+    validate_taxonomy_self_consistency(taxonomy, taxonomy_json)
     return taxonomy
+
+
+def validate_taxonomy_self_consistency(taxonomy: dict, taxonomy_json_path: str = "<taxonomy>") -> None:
+    """
+    Some taxonomy JSONs carry optional top-level 'species_id_to_name' / 'genus_id_to_name'
+    override dicts as a convenience. parse_taxonomy_config() uses these OVER whatever is
+    derivable from per-class 'species_id'/'genus_id' fields when they're present — so editing
+    a class's species_id without also updating the override is a silent no-op: the classifier
+    gets built with the OLD (wrong) number of output neurons while every other script that
+    reads 'classes' directly expects the NEW count. This checks the two agree, or that no
+    override exists at all (in which case there's nothing to drift).
+    """
+    classes = taxonomy.get("classes", {})
+    mismatches = []
+
+    def _check(id_field: str, override_key: str, label: str):
+        derived_ids = {info[id_field] for info in classes.values()
+                       if info.get(id_field, -100) != -100}
+
+        if override_key not in taxonomy:
+            return
+        override_ids = {int(k) for k in taxonomy[override_key].keys()}
+
+        missing_from_override = derived_ids - override_ids
+        for cid in sorted(missing_from_override):
+            mismatches.append(
+                f"  {label} {cid} is assigned to a class in 'classes' but missing from "
+                f"top-level '{override_key}' — that class will be silently dropped from "
+                f"model output sizing wherever '{override_key}' is used instead of 'classes'"
+            )
+        extra_in_override = override_ids - derived_ids
+        for cid in sorted(extra_in_override):
+            mismatches.append(
+                f"  {label} {cid} exists in top-level '{override_key}' but no class's "
+                f"'{id_field}' points to it"
+            )
+
+    _check("species_id", "species_id_to_name", "species_id")
+    _check("genus_id", "genus_id_to_name", "genus_id")
+
+    if mismatches:
+        raise TaxonomyMismatchError(
+            f"{taxonomy_json_path} is internally inconsistent — its per-class ids and its "
+            f"top-level *_id_to_name override dict(s) disagree:\n" + "\n".join(mismatches) +
+            "\n\nEither update the override dict to match, or delete it entirely and let "
+            "parse_taxonomy_config() derive everything from 'classes' (recommended — one "
+            "less place for the numbering to drift)."
+        )
 
 
 def load_yolo_class_names(data_yaml: str) -> Dict[int, str]:

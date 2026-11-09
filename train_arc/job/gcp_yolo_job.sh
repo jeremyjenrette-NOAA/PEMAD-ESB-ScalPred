@@ -109,7 +109,7 @@ python config/train_classifier.py \
     --crop_dir "${CROP_DIR}" \
     --taxonomy_json "${TAXONOMY_JSON}" \
     --backbone convnext_tiny \
-    --epochs 60 \
+    --epochs 100 \
     --num_workers 0 \
     --out_weights ${RUN_DIR}/weights/${LABEL}_tax.pt
 
