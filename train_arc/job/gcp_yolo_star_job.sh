@@ -18,7 +18,7 @@ export CUDA_VISIBLE_DEVICES=0
 
 YEAR=24
 LABEL=star
-MODEL=check/yolo12n.pt
+MODEL=check/yolo12m.pt
 BROAD_CLASS_NAME=star   # single-class name Stage 1 trains on
 
 PROJECT_DIR="$(pwd)/output"
@@ -27,7 +27,7 @@ ORIGINAL_YOLO_ROOT="${DATA_DIR}/yolo"
 BROAD_YOLO_ROOT="${DATA_DIR}/yolo_broad"
 CROP_DIR="${DATA_DIR}/crops"
 TAXONOMY_JSON="config/${LABEL}_taxonomy.json"
-CSV_SPLIT="${DATA_DIR}/annotations/dataset_split_crab_multiclass.csv"
+CSV_SPLIT="${DATA_DIR}/annotations/dataset_split_star.csv"
 
 JOB_ID="gcp_$(date +%Y%m%d_%H%M%S)"
 export SLURM_JOB_ID="${JOB_ID}"
@@ -70,7 +70,7 @@ python config/run_yolo.py \
     --data_root "${BROAD_YOLO_ROOT}" \
     --model ${MODEL} \
     --label ${LABEL} \
-    --epochs 120 \
+    --epochs 135 \
     --imgsz 1024 \
     --batch 16 \
     --workers 0 \
