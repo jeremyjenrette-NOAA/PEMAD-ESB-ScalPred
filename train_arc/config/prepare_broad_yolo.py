@@ -25,6 +25,8 @@ def main():
     parser.add_argument("--src_yolo", type=str, default="yolo", help="Source multi-class YOLO directory")
     parser.add_argument("--dst_yolo", type=str, default="yolo_broad", help="Destination broad YOLO directory")
     parser.add_argument("--splits", nargs="+", default=["train", "val"])
+    parser.add_argument("--broad_class_name", type=str, required=True,
+                        help="Name of the single broad class written to data.yaml (e.g. cancer_crab, star)")
     args = parser.parse_args()
 
     src_root = Path(args.src_yolo)
@@ -53,7 +55,7 @@ train: images/train
 val: images/val
 
 names:
-  0: cancer_crab
+  0: {args.broad_class_name}
 """
     with open(dst_root / "data.yaml", "w") as f:
         f.write(yaml_content)

@@ -1,0 +1,18 @@
+data/
+figures/
+train_arc/output
+
+# OS / R session junk and local staging
+.DS_Store
+**/.DS_Store
+.Rhistory
+**/.Rhistory
+train_arc/zenodo_stage/
+train_arc/data2226/
+
+# local helper scripts and benchmark output (not part of the release)
+s/archive02232026/
+s/copy_image.sh
+s/split_remap.py
+s/star_explore.R
+train_arc/bench_inference.json

@@ -28,9 +28,9 @@ export PYTORCH_ALLOC_CONF=expandable_segments:True
 export CUDA_VISIBLE_DEVICES=0
 
 # ─── 2. Parameter & Directory Configurations ──────────────────────────────────
-YEAR=24
-LABEL=star
-DATA_ROOT="star24"
+YEAR=2224
+LABEL=scallop
+DATA_ROOT="scallop2224"
 
 BASE_DIR="/home/user/PEMAD-ESB-ScalTrain/train_arc"
 JOB_ID="gcp_$(date +%Y%m%d_%H%M%S)"
@@ -78,7 +78,7 @@ ${VIAME_INSTALL}/bin/python -m viame.pytorch.netharn.detect_fit \
   --augmenter=complex \
   --schedule=ReduceLROnPlateau-p2-c2 \
   --ignore_first_epochs=2 \
-  --max_epoch=15 \
+  --max_epoch=40 \
   --patience=7 \
   --input_dims=window \
   --window_dims=640,640 \
@@ -128,12 +128,12 @@ python ${BASE_DIR}/config/eval_viame_detections_hung_multi.py \
   --out_csv "${JOB_OUT_DIR}/eval/autotest${YEAR}_viame_cascade.csv" \
   --gt_out_csv "${JOB_OUT_DIR}/eval/mantest${YEAR}_viame_cascade.csv" \
   --out_fn_csv "${JOB_OUT_DIR}/eval/fn${YEAR}_viame_cascade.csv" \
-  --conf 0.01 \
+  --conf 0.1 \
   --nms_iou 0.65 \
   --match_iou 0.1 \
-  --max_det 30 \
+  --max_det 600 \
   --debug_n 10 \
-  --spname asterias astropecten leptasterias  # Pass all 3 classes space-separated
+  --spname scallop  # Pass all classes space-separated
 
 # ─── 5. Storage Optimization Post-Clean ───────────────────────────────────────
 echo -e "\n=== Step 3: Preserving Deployment Package & Purging Heavy Artifacts ==="
