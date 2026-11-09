@@ -1,0 +1,69 @@
+{
+  "dataset_name": "Starfish_Asteroidea",
+  "ranks": ["genus", "species"],
+  "classes": {
+    "0": {
+      "name": "asterias_forbesi",
+      "genus": "Asterias",
+      "species": "forbesi",
+      "genus_id": 0,
+      "species_id": 0,
+      "is_resolved_species": true
+    },
+    "1": {
+      "name": "asterias_vulgaris",
+      "genus": "Asterias",
+      "species": "vulgaris",
+      "genus_id": 0,
+      "species_id": 1,
+      "is_resolved_species": true
+    },
+    "2": {
+      "name": "astropecten_americanus",
+      "genus": "Astropecten",
+      "species": "americanus",
+      "genus_id": 1,
+      "species_id": 2,
+      "is_resolved_species": true
+    },
+    "3": {
+      "name": "henricia",
+      "genus": "Henricia",
+      "species": "sp",
+      "genus_id": 2,
+      "species_id": 3,
+      "is_resolved_species": false
+    },
+    "4": {
+      "name": "leptasterias_tenera",
+      "genus": "Leptasterias",
+      "species": "tenera",
+      "genus_id": 3,
+      "species_id": 4,
+      "is_resolved_species": true
+    },
+    "5": {
+      "name": "sclerasterias",
+      "genus": "Sclerasterias",
+      "species": "sp",
+      "genus_id": 4,
+      "species_id": 5,
+      "is_resolved_species": false
+    }
+  },
+  "genus_id_to_name": {
+    "0": "Asterias",
+    "1": "Astropecten",
+    "2": "Henricia",
+    "3": "Leptasterias",
+    "4": "Sclerasterias"
+  },
+  "species_id_to_name": {
+    "0": "forbesi",
+    "1": "vulgaris",
+    "2": "americanus",
+    "3": "henricia_sp",
+    "4": "tenera",
+    "5": "sclerasterias_sp"
+  }
+}
