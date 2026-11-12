@@ -46,7 +46,7 @@ COVARIATES <- c("altitude" = "Altitude (m)", "bottom_depth" = "Bottom depth (m)"
                 "field_of_view_sq_meter" = "Field of view (m²)",
                 "fluorometer_backscatter_ntu" = "Backscatter (NTU)")
 # Crowding panel for Fig. 5 (YOLO boxes; images with >= 2 detections, where spacing is defined)
-CROWD_PANEL <- c("nn_ratio" = "Nearest-neighbour spacing / box size")
+CROWD_PANEL <- c("lowconf_frac" = "Share of detections below F1 threshold")   # common term of both image-level models
 # Detection-structure features (computed in gammod.R from YOLO boxes)
 STRUCTURE <- c("med_box_mm" = "Median box size (mm)", "lowconf_frac" = "Share below F1 threshold",
                "overlap_frac" = "Share of overlapping boxes", "nn_ratio" = "NN spacing / box size")
@@ -365,7 +365,7 @@ cov_assembly <- (wrap_plots(cov_plots, ncol = 2) / p_space) +
   theme(legend.position = "bottom")
 cov_assembly <- cov_assembly +
   plot_annotation(
-    title = "Holdout error vs. environmental covariates, crowding and space",
+    title = "Holdout error vs. environmental covariates, low-confidence share and space",
     subtitle = sprintf("Quantile-bin means ± 95%% CI (block-clustered SE); error scale: %s",
                        ERROR_SCALE),
     theme = theme(plot.title = element_text(size = 15, face = "bold", hjust = 0.5),

@@ -41,7 +41,9 @@ series = [("Two-stage", "full", "Two-stage, transferred forms", BLUE, "o"),
           ("Two-stage", "simple", "Two-stage, simplest forms", ORANGE, "s"),
           ("YOLO F1-threshold count", "full", "YOLOv12 F$_1$-threshold count", AQUA, "^")]
 fr = sorted(s.fraction.unique()); xpos = {f: i for i, f in enumerate(fr)}
-xlab = [f"{f*100:.0f}%\n1 in {50/(0.6*f):,.0f}" for f in fr]
+# x labels: annotation rate (2026 annotated 1 frame in 50; Calibration-fitting = 60% of them), then the share of all annotated 2026 images used to fit the GAMs (same definition as the rotating-holdout panel)
+pct = lambda v: f"{v:.2g}%"
+xlab = [f"1/{50/(0.6*f):,.0f}\n({f*60:.0f}%)" for f in fr]
 fig, axes = plt.subplots(2, 2, figsize=(7.0, 5.0), sharex=True)
 RMSE_CAP = {"GB": 0.65, "MAB": 0.22}
 for j, reg in enumerate(["GB", "MAB"]):
@@ -68,7 +70,7 @@ for j, reg in enumerate(["GB", "MAB"]):
             nsc = s[(s.region == reg) & (s.method == "Two-stage") & (s.variant == "full")].sort_values("fraction")
             ax.set_title(f"{'Georges Bank' if reg == 'GB' else 'Mid-Atlantic Bight'}", fontsize=9, color=INK)
         ax.set_xticks(range(len(fr))); ax.set_xticklabels(xlab)
-fig.supxlabel("Share of 2026 Calibration-fitting used to fit the GAMs (and the equivalent annotation rate, frames per survey frames)",
+fig.supxlabel("Annotation rate used to fit the GAMs (annotated frames per recorded frames; share of all annotated 2026 images in brackets)",
               fontsize=8, color=INK, y=0.035)
 h, l = axes[0, 0].get_legend_handles_labels()
 fig.legend(h, l, loc="lower center", ncol=3, bbox_to_anchor=(0.5, -0.03))
@@ -80,7 +82,8 @@ cvp = Path("../data/processed/tierb2026/effort_cv/effort_cv_summary.csv")
 if cvp.exists():
     c = pd.read_csv(cvp)
     rates = sorted(c.survey_frames_per_annotated.unique(), reverse=True); xp = {r: i for i, r in enumerate(rates)}
-    xlab = [f"1 in {r:,.0f}" for r in rates]
+    frac_of = c.groupby("survey_frames_per_annotated").fraction.first()   # thinning of the nine training folds (90%)
+    xlab = [f"1/{r:,.0f}\n({frac_of[r]*90:.0f}%)" for r in rates]
     ser = [("Two-stage", "Two-stage calibration (transferred forms)", BLUE, "o"),
            ("YOLO F1-threshold count", "YOLOv12 F$_1$-threshold count", AQUA, "^")]
     LIM = {("pct_bias_total", "GB"): (-25, 25), ("pct_bias_total", "MAB"): (-15, 10),
@@ -109,8 +112,8 @@ if cvp.exists():
             ax.set_ylim(lo_lim, hi_lim)
             if j == 0: ax.set_ylabel(ylab)
             if i == 0: ax.set_title("Georges Bank" if reg == "GB" else "Mid-Atlantic Bight", fontsize=9, color=INK)
-            ax.set_xticks(range(len(rates))); ax.set_xticklabels(xlab, rotation=30, ha="right")
-    fig.supxlabel("Annotation rate used to fit the GAMs (annotated frames per survey frames)", fontsize=8, color=INK, y=0.03)
+            ax.set_xticks(range(len(rates))); ax.set_xticklabels(xlab)
+    fig.supxlabel("Annotation rate used to fit the GAMs (annotated frames per recorded frames; share of all annotated 2026 images in brackets)", fontsize=8, color=INK, y=0.03)
     h, l = axes[0, 0].get_legend_handles_labels()
     fig.legend(h, l, loc="lower center", ncol=2, bbox_to_anchor=(0.5, -0.03))
     fig.tight_layout(rect=(0, 0.06, 1, 1))
