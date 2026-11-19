@@ -92,7 +92,6 @@ If you use this code, please cite the paper and the archived release:
 
 Jenrette, J.F., Hart, D.R., Chang, J.-H., Fairclough, C., McManus, M.C. PEMAD-ESB-ScalPred: two-stage GAM calibration, abundance and shell-height analysis for automated sea scallop counts. Zenodo. https://doi.org/10.5281/zenodo.23967377
 
-Data: https://doi.org/10.5281/zenodo.23481212 (resolves once the record is published with the paper)
 
 ## License
 
