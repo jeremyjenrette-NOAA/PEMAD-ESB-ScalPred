@@ -205,8 +205,8 @@ pd <- boot %>% select(region, method, rmse, rmse_lo, rmse_hi, pct_bias_total, bi
          method = factor(method, levels = rev(names(PRED))))
 p <- ggplot(pd, aes(value, method)) +
   geom_vline(data = tibble(metric = "Holdout total bias (%)", x = 0), aes(xintercept = x), linetype = 2, colour = "grey50") +
-  geom_errorbar(aes(xmin = lo, xmax = hi), width = 0, orientation = "y", colour = "#2a78d6") +
-  geom_point(colour = "#2a78d6", size = 1.8) +
+  geom_errorbar(aes(xmin = lo, xmax = hi), width = 0, orientation = "y", colour = "grey15") +
+  geom_point(colour = "grey15", size = 1.8) +
   facet_grid(. ~ region + metric, scales = "free_x") +
   labs(x = NULL, y = "Stage 1 + stage 2 model") + theme_bw(base_size = 9) +
   theme(panel.grid.minor = element_blank())

@@ -40,9 +40,9 @@ This repository reproduces every calibration, abundance and size result in Jenre
 | Table 1 (detection-level model selection) | `gamstrat.R`, then `tables/make_table2.py` |
 | Table 2 (image-level model selection), Table S5 (ablation) | `n3/n3_ablation.R`, then `n3/make_n3_tables.py` |
 | Fig. 4 (ablation) | `n3/plot_n3_ablation.py` |
-| Fig. 5, Fig. S2 (Holdout test counts and totals) | `n3/n3_export_holdout.R`, then `fig_holdout.R` |
-| Fig. 6, Fig. S9 (error by covariate and image feature), Table S2 | `error.R`, then `tables/make_tableS1.py` |
-| Fig. 7, Figs. S6–S7, Table S4 (shell height) | from `length/`: `match_size_pairs.py`, then `size_revision.R` |
+| Fig. S2 (Holdout test counts and totals) | `n3/n3_export_holdout.R`, then `fig_holdout.R` |
+| Fig. 5, Fig. S9 (error by covariate and image feature), Table S2 | `error.R`, then `tables/make_tableS1.py` |
+| Fig. 6, Figs. S6–S7, Table S4 (shell height) | from `length/`: `match_size_pairs.py`, then `size_revision.R` |
 | Fig. S1 (stratification) | `strat_vis.R` |
 | Table S3, Fig. S3 (independent 2026 survey test) | `tierb/tierb_calibration.R` |
 | Fig. S4 (annotation effort; fixed and rotating holdout) | `tierb/tierb_effort.R`, `tierb/tierb_effort_cv.R`, then `revision_figs.py` |
@@ -62,7 +62,7 @@ s/                  calibration, evaluation and figure scripts (run from s/)
   gamstrat.R          detection-level GAM selection by block CV (Table 1)
   gammod.R            image-level inputs and the original image-level GAMs
   performance.R       precision-recall and F1 curves (Fig. 3, Table S1)
-  error.R             Holdout test error by covariate, image feature and space (Fig. 6, Fig. S9)
+  error.R             Holdout test error by covariate, image feature and space (Fig. 5, Fig. S9)
   n3/                 ablation of calibration steps and detectors, image-level selection,
                       random forest / boosted trees, fitted-GAM figure
   tierb/              independent 2026 survey test and annotation effort
@@ -71,7 +71,7 @@ s/                  calibration, evaluation and figure scripts (run from s/)
   *func.R             shared functions (data, fitting, cross-validation, plotting)
   reproduce_paper.sh  runs everything in order (see above)
   run_pipeline.sh     core pipeline only: makedat -> gamstrat -> gammod -> error
-length/             shell-height matching and validation (Fig. 7, Figs. S6-S7, Table S4)
+length/             shell-height matching and validation (Fig. 6, Figs. S6-S7, Table S4)
 pred/               survey-wide inference: run YOLOv12n (yolo_deploy/) or Cascade R-CNN
                     (viame_project2224/) on new imagery
 data/               not tracked; filled from the Zenodo record (pipeline_inputs.zip)

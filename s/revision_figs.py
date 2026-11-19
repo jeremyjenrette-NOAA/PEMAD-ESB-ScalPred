@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 
 OUT = Path("../figures/revision"); OUT.mkdir(parents=True, exist_ok=True)
 OVERLEAF = Path.home() / "Library/CloudStorage/Dropbox/Apps/Overleaf/NEFSC-scallop-detection/ms_figures"
-BLUE, ORANGE, AQUA = "#2a78d6", "#eb6834", "#1baf7a"     # categorical slots 1-3
+from palette import TWO_STAGE, TWO_STAGE_YC, F1_YOLO, F1_CASCADE, SIMPLEST   # shared workflow colours
 INK, INK2, GRID = "#0b0b0b", "#52514e", "#e6e5e0"
 plt.rcParams.update({"font.size": 8, "axes.edgecolor": INK2, "axes.labelcolor": INK, "xtick.color": INK2,
                      "ytick.color": INK2, "axes.spines.top": False, "axes.spines.right": False,
@@ -37,9 +37,9 @@ def save(fig, name):
 
 # ---------------------------------------------------------------- Fig. S5: effort
 s = pd.read_csv("../data/processed/tierb2026/effort_summary.csv")
-series = [("Two-stage", "full", "Two-stage, transferred forms", BLUE, "o"),
-          ("Two-stage", "simple", "Two-stage, simplest forms", ORANGE, "s"),
-          ("YOLO F1-threshold count", "full", "YOLOv12 F$_1$-threshold count", AQUA, "^")]
+series = [("Two-stage", "full", "Two-stage, transferred forms", TWO_STAGE, "o"),
+          ("Two-stage", "simple", "Two-stage, simplest forms", SIMPLEST, "s"),
+          ("YOLO F1-threshold count", "full", "YOLOv12 F$_1$-threshold count", F1_YOLO, "^")]
 fr = sorted(s.fraction.unique()); xpos = {f: i for i, f in enumerate(fr)}
 # x labels: annotation rate (2026 annotated 1 frame in 50; Calibration-fitting = 60% of them), then the share of all annotated 2026 images used to fit the GAMs (same definition as the rotating-holdout panel)
 pct = lambda v: f"{v:.2g}%"
@@ -84,8 +84,8 @@ if cvp.exists():
     rates = sorted(c.survey_frames_per_annotated.unique(), reverse=True); xp = {r: i for i, r in enumerate(rates)}
     frac_of = c.groupby("survey_frames_per_annotated").fraction.first()   # thinning of the nine training folds (90%)
     xlab = [f"1/{r:,.0f}\n({frac_of[r]*90:.0f}%)" for r in rates]
-    ser = [("Two-stage", "Two-stage calibration (transferred forms)", BLUE, "o"),
-           ("YOLO F1-threshold count", "YOLOv12 F$_1$-threshold count", AQUA, "^")]
+    ser = [("Two-stage", "Two-stage calibration (transferred forms)", TWO_STAGE, "o"),
+           ("YOLO F1-threshold count", "YOLOv12 F$_1$-threshold count", F1_YOLO, "^")]
     LIM = {("pct_bias_total", "GB"): (-25, 25), ("pct_bias_total", "MAB"): (-15, 10),
            ("rmse", "GB"): (0.35, 0.60), ("rmse", "MAB"): (0.13, 0.25)}
     fig, axes = plt.subplots(2, 2, figsize=(7.0, 5.0), sharex=True)
@@ -122,11 +122,10 @@ if cvp.exists():
 # ---------------------------------------------------------------- Fig. S6: Tier A
 m = pd.read_csv("../data/processed/tiera/tiera_holdout_metrics.csv")
 b = pd.read_csv("../data/processed/tiera/tiera_holdout_bootstrap.csv").dropna(subset=["region"])
-PURPLE = "#6250d6"
-meths = [("Two-stage, one detector", "Two-stage, YOLOv12", BLUE, "o"),
-         ("Two-stage, two detectors", "Two-stage, YOLOv12 + Cascade R-CNN", PURPLE, "D"),
-         ("YOLOv12 F1", "YOLOv12 F$_1$-threshold count", AQUA, "^"),
-         ("Cascade F1", "Cascade R-CNN F$_1$-threshold count", ORANGE, "s")]
+meths = [("Two-stage, one detector", "Two-stage, YOLOv12", TWO_STAGE, "o"),
+         ("Two-stage, two detectors", "Two-stage, YOLOv12 + Cascade R-CNN", TWO_STAGE_YC, "D"),
+         ("YOLOv12 F1", "YOLOv12 F$_1$-threshold count", F1_YOLO, "^"),
+         ("Cascade F1", "Cascade R-CNN F$_1$-threshold count", F1_CASCADE, "s")]
 fig, axes = plt.subplots(1, 2, figsize=(7.4, 3.5), gridspec_kw={"width_ratios": [4, 3]})
 for ax, reg in zip(axes, ["GB", "MAB"]):
     style(ax); ax.axhline(0, color=INK2, lw=0.8, ls="--")

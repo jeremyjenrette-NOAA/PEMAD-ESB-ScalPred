@@ -13,9 +13,10 @@ r2_11 <- function(y, x) 1 - sum((y - x)^2) / sum((y - mean(y))^2)
 rmse  <- function(y, x) sqrt(mean((y - x)^2))
 
 # ---------------- Fig. 4: rows = calibration steps (YOLOv12) ----------------
-ROWS <- list(list(col = "yolo_f1",      title = expression("F"[1] ~ "threshold"),        colour = "#FB6A4A"),
-             list(col = "pred_yolo",    title = expression("Stage 1 only:" ~ Sigma ~ p[det]), colour = "#CB181D"),
-             list(col = "pred_2s_yolo", title = "Two-stage calibration",               colour = "#7570B3"))
+source("./palette.R")
+ROWS <- list(list(col = "yolo_f1",      title = expression("F"[1] ~ "threshold"),        colour = PAL$f1_yolo),
+             list(col = "pred_yolo",    title = expression("Stage 1 only:" ~ Sigma ~ p[det]), colour = PAL$stage1_yolo),
+             list(col = "pred_2s_yolo", title = "Two-stage calibration",               colour = PAL$two_stage))
 zoom <- ev %>% group_by(region) %>% summarise(lim = max(5, quantile(n_annotations, 0.95)))
 zl <- setNames(zoom$lim, zoom$region)
 
@@ -54,9 +55,9 @@ ggsave(file.path(FIG, "2226_holdout_1to1_yolo_steps.pdf"), fig4, width = 13, hei
 # ---------------- Fig. S3: totals by workflow and region ----------------
 M <- c("YOLOv12 F1" = "yolo_f1", "YOLOv12 stage 1" = "pred_yolo", "Two-stage YOLOv12" = "pred_2s_yolo",
        "Cascade F1" = "cascade_f1", "Cascade stage 1" = "pred_cascade", "Two-stage YOLOv12 + Cascade" = "pred_2s_yc")
-COL <- c("Manual count" = "grey40", "YOLOv12 F1" = "#FB6A4A", "YOLOv12 stage 1" = "#CB181D",
-         "Two-stage YOLOv12" = "#7570B3", "Cascade F1" = "#6BAED6", "Cascade stage 1" = "#2171B5",
-         "Two-stage YOLOv12 + Cascade" = "#3F007D")
+COL <- c("Manual count" = "grey40", "YOLOv12 F1" = PAL$f1_yolo, "YOLOv12 stage 1" = PAL$stage1_yolo,
+         "Two-stage YOLOv12" = PAL$two_stage, "Cascade F1" = PAL$f1_cascade, "Cascade stage 1" = PAL$stage1_cascade,
+         "Two-stage YOLOv12 + Cascade" = PAL$two_stage_yc)
 tot <- ev %>% group_by(region) %>%
   summarise(`Manual count` = sum(n_annotations), across(all_of(unname(M)), sum), .groups = "drop") %>%
   rename(any_of(M)) %>%

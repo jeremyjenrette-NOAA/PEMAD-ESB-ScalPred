@@ -65,7 +65,8 @@ writeLines(c("\\begin{table}[htbp]", "\\centering",
   "\\end{flushleft}", "\\end{table}"), "tables/table1_detection.tex")
 
 # ---------------- Figure (supplement): PR and F1 curves ----------------
-COL <- c("YOLOv12" = "#CB181D", "Cascade R-CNN" = "#2171B5", "RT-DETR-L" = "#238B45")
+source("./palette.R")
+COL <- c("YOLOv12" = PAL$yolo, "Cascade R-CNN" = PAL$cascade, "RT-DETR-L" = PAL$rtdetr)
 th <- theme_bw(base_size = 10) + theme(panel.grid.minor = element_blank(), legend.position = "bottom")
 p_pr <- ggplot(pr_all %>% filter(!is.na(precision), !is.na(recall)),
                aes(recall, precision, colour = detector, linetype = region)) +

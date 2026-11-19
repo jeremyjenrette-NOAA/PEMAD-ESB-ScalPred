@@ -99,8 +99,7 @@ lab <- n1_region %>% mutate(txt = sprintf("n = %s\nslope %.2f, R² %.2f\nbias %.
 p_sc <- ggplot(pairs, aes(true_mm, pred_mm)) +
   geom_point(alpha = 0.08, size = 0.5, colour = "#2a78d6") +
   geom_abline(linetype = 2, colour = "grey40") +
-  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, colour = "#eb6834", linewidth = 0.6) +
-  geom_vline(xintercept = SIZE_CUT, linetype = 3, colour = "grey50") +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, colour = "navyblue", linewidth = 0.6) +
   geom_text(data = lab, aes(x = 5, y = 175, label = txt), hjust = 0, vjust = 1, size = 2.6, colour = "grey15") +
   facet_grid(region ~ model) + coord_equal(xlim = c(0, 180), ylim = c(0, 180)) +
   labs(x = "Manual shell height (mm)", y = "Predicted shell height (mm)") +
@@ -111,9 +110,9 @@ ggsave(file.path(FIG_DIR, "2226_size_scatter.png"), p_sc, width = 7.5, height = 
 p_ba <- ggplot(pairs, aes(mean_mm, err)) +
   geom_point(alpha = 0.08, size = 0.5, colour = "#2a78d6") +
   geom_hline(yintercept = 0, colour = "grey40") +
-  geom_hline(data = n1_region, aes(yintercept = bias), colour = "#eb6834") +
-  geom_hline(data = n1_region, aes(yintercept = loa_lo), colour = "#eb6834", linetype = 2) +
-  geom_hline(data = n1_region, aes(yintercept = loa_hi), colour = "#eb6834", linetype = 2) +
+  geom_hline(data = n1_region, aes(yintercept = bias), colour = "navyblue") +
+  geom_hline(data = n1_region, aes(yintercept = loa_lo), colour = "navyblue", linetype = 2) +
+  geom_hline(data = n1_region, aes(yintercept = loa_hi), colour = "navyblue", linetype = 2) +
   facet_grid(region ~ model) + coord_cartesian(xlim = c(0, 180), ylim = c(-40, 40)) +
   labs(x = "Mean of predicted and manual shell height (mm)", y = "Predicted - manual (mm)") +
   theme_bw(base_size = 9) + theme(panel.grid.minor = element_blank())
@@ -177,7 +176,7 @@ cat("\nN2 size-class metrics:\n"); pr(n2 %>% mutate(across(where(is.numeric), ~ 
 
 # ------------------------------------------------------------------------------
 # Replacement for the size-frequency figure: region x model, 5 mm bins,
-# manual vs F1-threshold vs calibrated (all detections), 40 mm cutoff marked
+# manual vs F1-threshold vs calibrated (all detections)
 # ------------------------------------------------------------------------------
 freq <- function(x, w = NULL) {
   br <- seq(0, MAX_SH_MM, by = FREQ_BIN); if (is.null(w)) w <- rep(1, length(x))
@@ -200,9 +199,8 @@ olab <- n2 %>% filter(size_class == "All") %>%
 p_fd <- ggplot(fd, aes(mid, pct)) +
   geom_area(data = filter(fd, workflow == "Manual"), fill = "grey85", colour = "grey35", linewidth = 0.4) +
   geom_line(data = filter(fd, workflow != "Manual"), aes(colour = workflow), linewidth = 0.6) +
-  geom_vline(xintercept = SIZE_CUT, linetype = 3, colour = "grey40") +
   geom_text(data = olab, aes(x = 178, y = Inf, label = txt), hjust = 1, vjust = 1.3, size = 2.6, inherit.aes = FALSE) +
-  scale_colour_manual(values = c("F1 threshold" = "#2a78d6", "Calibrated (sum of p)" = "#eb6834"),
+  scale_colour_manual(values = c("F1 threshold" = "#D7301F", "Calibrated (sum of p)" = "navyblue"),   # palette.R: f1_yolo, stage1_yolo
                       labels = c(expression(F[1]~"threshold"), "Calibrated (sum of p)")) +
   facet_grid(region ~ model, scales = "free_y") +
   labs(x = "Shell height (mm, 5 mm bins)", y = "Share of scallops (%)", colour = NULL) +

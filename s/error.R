@@ -36,9 +36,10 @@ METHODS <- c("Two-stage YOLOv12"           = "pred_2s_yolo",
              "YOLOv12 stage 1"  = "pred_yolo", "Cascade stage 1" = "pred_cascade",
              "YOLOv12 F1"       = "yolo_f1",   "Cascade F1"      = "cascade_f1")
 REF_METHOD <- "Two-stage YOLOv12"
-METHOD_COLORS <- c("Two-stage YOLOv12" = "#7570B3", "Two-stage YOLOv12 + Cascade" = "#3F007D",
-                   "YOLOv12 stage 1"   = "#CB181D", "Cascade stage 1" = "#2171B5",
-                   "YOLOv12 F1"        = "#FB6A4A", "Cascade F1"      = "#6BAED6")
+source("./palette.R")
+METHOD_COLORS <- c("Two-stage YOLOv12" = PAL$two_stage, "Two-stage YOLOv12 + Cascade" = PAL$two_stage_yc,
+                   "YOLOv12 stage 1"   = PAL$stage1_yolo, "Cascade stage 1" = PAL$stage1_cascade,
+                   "YOLOv12 F1"        = PAL$f1_yolo,     "Cascade F1"      = PAL$f1_cascade)
 PLOT_METHODS <- c("Two-stage YOLOv12", "YOLOv12 F1", "Cascade F1")   # covariate/spatial panels
 
 COVARIATES <- c("altitude" = "Altitude (m)", "bottom_depth" = "Bottom depth (m)",
@@ -194,31 +195,52 @@ bin_for_plot <- function(df, x_var, n_bins = N_PLOT_BINS) {
     filter(n >= 10)
 }
 
-plot_covariate_error <- function(df, x_var, x_label) {
-  d  <- df %>% filter(Method %in% PLOT_METHODS)
-  bd <- bin_for_plot(d, x_var)
-  # dodge proportional to the typical gap between bin centres, per region
-  gap <- bd %>% distinct(region, x_bin, x_mid) %>% group_by(region) %>% arrange(x_mid, .by_group = TRUE) %>%
-    summarise(g = median(diff(x_mid)), .groups = "drop")
-  # fallback when a region has a single bin: a tenth of the covariate's 5-95% range
-  rng <- d %>% group_by(region) %>%
-    summarise(r = diff(quantile(.data[[x_var]], c(0.05, 0.95), na.rm = TRUE)), .groups = "drop") %>%
-    mutate(r = ifelse(is.finite(r) & r > 0, r / 10, 0.05))
-  bd <- bd %>% left_join(gap, by = "region") %>% left_join(rng, by = "region") %>%
-    mutate(g = ifelse(is.finite(g) & g > 0, g, r),
-           # offset: the smaller of a fifth of the bin gap and 1.5% of the covariate's 5-95% range,
-           # so points never look as if they sit at different covariate values
-           off = pmin(0.2 * g, 0.15 * r),
-           x_plot = x_mid + (as.integer(factor(Method, levels = PLOT_METHODS)) - 2) * off)
-  ggplot(bd, aes(x = x_plot, y = mean_err, colour = Method)) +
-    geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
-    geom_linerange(aes(ymin = mean_err - 1.96 * se_err, ymax = mean_err + 1.96 * se_err), linewidth = 0.4) +
-    geom_point(size = 1.4) +
+# One covariate panel pair (one column per region):
+#   top    - mean error per quantile bin of the covariate, a line per workflow with its
+#            95% interval as a translucent band (no horizontal dodging needed)
+#   bottom - how the Holdout images are spread along the covariate (grey histogram),
+#            so the reader sees where the bins sit and how much data supports each
+plot_covariate_error <- function(df, x_var, x_label, tag = NULL) {
+  d  <- df %>% filter(Method %in% PLOT_METHODS, !is.na(.data[[x_var]]))
+  bd <- bin_for_plot(d, x_var) %>% mutate(Method = factor(Method, levels = PLOT_METHODS))
+  img <- d %>% filter(Method == PLOT_METHODS[1]) %>% transmute(region, x = .data[[x_var]])
+  # shared x range per region so the two rows line up
+  # x range: 1st-99th percentile per region, so a few extreme values (backscatter,
+  # temperature) do not squash the curves into one corner; bin means sit well inside it
+  xr <- img %>% group_by(region) %>%
+    summarise(lo = quantile(x, 0.01), hi = quantile(x, 0.99), .groups = "drop") %>%
+    mutate(hi = ifelse(hi > lo, hi, lo + 1e-6))
+  # 25 equal-width bins per region over that range (a region with a single value gets one bar)
+  hist_d <- img %>% left_join(xr, by = "region") %>% filter(x >= lo, x <= hi) %>%
+    mutate(w = pmax((hi - lo) / 25, 1e-9),
+           k = pmin(floor((x - lo) / w), 24)) %>%
+    count(region, lo, w, k) %>%
+    mutate(l = lo + k * w, r = l + w)
+  rng_pts <- xr %>% tidyr::pivot_longer(c(lo, hi), values_to = "x")
+  th <- theme_bw(base_size = 11) +
+    theme(panel.grid.minor = element_blank(), strip.background = element_rect(fill = "grey95", colour = NA),
+          legend.position = "bottom")
+  p_top <- ggplot(bd, aes(x = x_mid, y = mean_err, colour = Method, fill = Method)) +
+    geom_hline(yintercept = 0, linetype = "dashed", colour = "grey45") +
+    geom_ribbon(aes(ymin = mean_err - 1.96 * se_err, ymax = mean_err + 1.96 * se_err),
+                alpha = 0.14, colour = NA) +
+    geom_line(linewidth = 0.7) +
+    geom_point(aes(shape = Method), size = 2) +
+    geom_blank(data = rng_pts, aes(x = x), inherit.aes = FALSE) +
     facet_wrap(~ region, scales = "free") +
-    scale_colour_manual(values = METHOD_COLORS) +
-    theme_bw(base_size = 11) +
-    labs(x = x_label, y = y_lab, colour = NULL) +
-    theme(legend.position = "bottom", panel.grid.minor = element_blank())
+    scale_colour_manual(values = METHOD_COLORS) + scale_fill_manual(values = METHOD_COLORS) +
+    scale_shape_manual(values = METHOD_SHAPES) +
+    labs(x = NULL, y = y_lab, colour = NULL, fill = NULL, shape = NULL, tag = tag) + th +
+    theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+  p_bot <- ggplot(hist_d) +
+    geom_rect(aes(xmin = l, xmax = r, ymin = 0, ymax = n), fill = "grey70", colour = "white", linewidth = 0.2) +
+    geom_blank(data = rng_pts, aes(x = x), inherit.aes = FALSE) +
+    facet_wrap(~ region, scales = "free") +
+    scale_y_continuous(breaks = function(l) pretty(l, n = 2), expand = expansion(mult = c(0, 0.05))) +
+    labs(x = x_label, y = "Images") + th +
+    theme(strip.text = element_blank(), strip.background = element_blank(),
+          axis.title.y = element_text(size = 9), axis.text.y = element_text(size = 8))
+  (p_top / p_bot) + plot_layout(heights = c(3, 1))
 }
 
 cov_plots <- lapply(names(COVARIATES), function(v) plot_covariate_error(err_long, v, COVARIATES[[v]]))
@@ -237,8 +259,9 @@ write.csv(image_error_summary, file.path(OUT_DIR, "holdout_image_error_summary_2
 struct_vars <- intersect(names(STRUCTURE), names(err_long))
 # Box size needs one detection; shares and spacing are only informative with >= 2
 # (with one detection overlap = 0, spacing = cap and the low-confidence share is 0 or 1).
-struct_plots <- lapply(struct_vars, function(v)
-  plot_covariate_error(err_long %>% filter(n_det_all >= if (v == "med_box_mm") 1 else 2), v, STRUCTURE[[v]]))
+struct_plots <- lapply(seq_along(struct_vars), function(i) { v <- struct_vars[i]
+  plot_covariate_error(err_long %>% filter(n_det_all >= if (v == "med_box_mm") 1 else 2), v, STRUCTURE[[v]],
+                       tag = LETTERS[i]) })
 
 # ----------------------------------------------------------------------
 # 5b. Calibration by PREDICTED count
@@ -279,7 +302,7 @@ p_calib <- ggplot(calib %>% filter(Method %in% PLOT_METHODS),
   scale_colour_manual(values = METHOD_COLORS) +
   theme_bw(base_size = 11) +
   labs(x = "Mean predicted count (bin)", y = "Mean annotated count",
-       colour = NULL) +
+       colour = NULL, tag = LETTERS[length(struct_vars) + 1]) +
   theme(legend.position = "bottom", panel.grid.minor = element_blank())
 
 # ----------------------------------------------------------------------
@@ -302,8 +325,7 @@ p_space <- ggplot(grid_df, aes(lon_grid, lat_grid, fill = mean_cell_err)) +
                        name = "Mean error\n(pred - true)") +
   coord_quickmap() +
   theme_bw(base_size = 11) +
-  labs(x = "Longitude", y = "Latitude",
-       subtitle = sprintf("%.1f° cells with ≥ %d holdout images", GRID_DEG, GRID_MIN_N)) +
+  labs(x = "Longitude", y = "Latitude") +   # cell size and minimum images: in the caption
   theme(legend.position = "bottom", legend.key.width = unit(1.5, "cm"),
         strip.text = element_text(face = "bold"), panel.grid.minor = element_blank())
 
@@ -360,31 +382,36 @@ write.csv(spatial_stability,       file.path(OUT_DIR, "holdout_spatial_stability
 # ----------------------------------------------------------------------
 # 8. Assemble and save
 # ----------------------------------------------------------------------
-cov_assembly <- (wrap_plots(cov_plots, ncol = 2) / p_space) +
-  plot_layout(heights = c(2.2, 1.3), guides = "collect") &
-  theme(legend.position = "bottom")
-cov_assembly <- cov_assembly +
+# Maps keep their aspect ratio, so give them only the height they fill (no blank band
+# between the covariate panels and the maps); legends collected in one bottom row.
+cov_core <- (wrap_plots(cov_plots, ncol = 2) / p_space) +
+  plot_layout(heights = c(3.6, 1), guides = "collect") &
+  theme(legend.position = "bottom", legend.box.spacing = unit(2, "pt"),
+        plot.margin = margin(3, 5, 3, 5))
+COV_W <- 11; COV_H <- 14.5
+# manuscript version: no title (the caption carries it)
+ggsave(file.path(FIG_DIR, "2226_covariate_error_comparison.pdf"), cov_core, width = COV_W, height = COV_H,
+       device = if (capabilities("cairo")) cairo_pdf else "pdf")
+# presentation version: with a title
+cov_assembly <- cov_core +
   plot_annotation(
     title = "Holdout error vs. environmental covariates, low-confidence share and space",
-    subtitle = sprintf("Quantile-bin means ± 95%% CI (block-clustered SE); error scale: %s",
+    subtitle = sprintf("Lines: quantile-bin means; bands: 95%% CI (block-clustered SE); grey: images along each covariate; error scale: %s",
                        ERROR_SCALE),
     theme = theme(plot.title = element_text(size = 15, face = "bold", hjust = 0.5),
                   plot.subtitle = element_text(size = 10, hjust = 0.5, colour = "grey30")))
 
 # cairo_pdf embeds the Unicode labels (°, ², ≥) that the default pdf device warns about
-ggsave(file.path(FIG_DIR, "2226_covariate_error_comparison.pdf"), cov_assembly, width = 11, height = 14,
-       device = if (capabilities("cairo")) cairo_pdf else "pdf")
 if (dir.exists(path.expand(PRES_DIR))) {
   ggsave(file.path(PRES_DIR, "2226_covariate_error_comparison.png"), cov_assembly,
-         width = 11, height = 14, bg = "white")
+         width = COV_W, height = COV_H + 0.6, bg = "white")
 }
 struct_assembly <- (wrap_plots(struct_plots, ncol = 2) / p_calib) +
   plot_layout(heights = c(2, 1.2), guides = "collect") &
   theme(legend.position = "bottom")
-struct_assembly <- struct_assembly + plot_annotation(tag_levels = "A")
-ggsave(file.path(FIG_DIR, "2226_structure_error_calibration.pdf"), struct_assembly, width = 10, height = 11,
+ggsave(file.path(FIG_DIR, "2226_structure_error_calibration.pdf"), struct_assembly, width = 10, height = 13,
        device = if (capabilities("cairo")) cairo_pdf else "pdf")
-ggsave(file.path(FIG_DIR, "2226_structure_error_calibration.png"), struct_assembly, width = 10, height = 11,
+ggsave(file.path(FIG_DIR, "2226_structure_error_calibration.png"), struct_assembly, width = 10, height = 13,
        dpi = 300, bg = "white")
 ovl_fig <- path.expand("~/Library/CloudStorage/Dropbox/Apps/Overleaf/NEFSC-scallop-detection/ms_figures")
 if (dir.exists(ovl_fig)) file.copy(file.path(FIG_DIR, c("2226_structure_error_calibration.pdf",
